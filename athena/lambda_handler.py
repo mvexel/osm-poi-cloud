@@ -94,7 +94,9 @@ def handle_pois(params, headers):
         return {
             "statusCode": 400,
             "headers": headers,
-            "body": json.dumps({"error": "bbox parameter required (minLon,minLat,maxLon,maxLat)"}),
+            "body": json.dumps(
+                {"error": "bbox parameter required (minLon,minLat,maxLon,maxLat)"}
+            ),
         }
 
     try:
@@ -103,7 +105,9 @@ def handle_pois(params, headers):
         return {
             "statusCode": 400,
             "headers": headers,
-            "body": json.dumps({"error": "Invalid bbox format. Use: minLon,minLat,maxLon,maxLat"}),
+            "body": json.dumps(
+                {"error": "Invalid bbox format. Use: minLon,minLat,maxLon,maxLat"}
+            ),
         }
 
     # Validate bbox
@@ -111,7 +115,9 @@ def handle_pois(params, headers):
         return {
             "statusCode": 400,
             "headers": headers,
-            "body": json.dumps({"error": "Invalid bbox: min values must be less than max values"}),
+            "body": json.dumps(
+                {"error": "Invalid bbox: min values must be less than max values"}
+            ),
         }
 
     # Limit bbox size to prevent huge queries
@@ -119,7 +125,9 @@ def handle_pois(params, headers):
         return {
             "statusCode": 400,
             "headers": headers,
-            "body": json.dumps({"error": "Bbox too large. Max 5 degrees on each side."}),
+            "body": json.dumps(
+                {"error": "Bbox too large. Max 5 degrees on each side."}
+            ),
         }
 
     poi_class = params.get("class")
@@ -153,9 +161,26 @@ def handle_pois(params, headers):
     # Convert to GeoJSON
     features = []
     for row in results:
-        (osm_id, osm_type, name, poi_class, lon, lat, state,
-         amenity, shop, leisure, tourism, cuisine, opening_hours,
-         phone, website, brand, operator, tags) = row
+        (
+            osm_id,
+            osm_type,
+            name,
+            poi_class,
+            lon,
+            lat,
+            state,
+            amenity,
+            shop,
+            leisure,
+            tourism,
+            cuisine,
+            opening_hours,
+            phone,
+            website,
+            brand,
+            operator,
+            tags,
+        ) = row
 
         properties = {
             "osm_id": osm_id,
@@ -187,24 +212,28 @@ def handle_pois(params, headers):
             except json.JSONDecodeError:
                 pass
 
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [float(lon), float(lat)],
-            },
-            "properties": properties,
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(lon), float(lat)],
+                },
+                "properties": properties,
+            }
+        )
 
     return {
         "statusCode": 200,
         "headers": headers,
-        "body": json.dumps({
-            "type": "FeatureCollection",
-            "features": features,
-            "count": len(features),
-            "bbox": [min_lon, min_lat, max_lon, max_lat],
-        }),
+        "body": json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": features,
+                "count": len(features),
+                "bbox": [min_lon, min_lat, max_lon, max_lat],
+            }
+        ),
     }
 
 
@@ -228,7 +257,9 @@ def run_athena_query(query, timeout=30):
         if state == "SUCCEEDED":
             break
         elif state in ("FAILED", "CANCELLED"):
-            reason = status["QueryExecution"]["Status"].get("StateChangeReason", "Unknown")
+            reason = status["QueryExecution"]["Status"].get(
+                "StateChangeReason", "Unknown"
+            )
             raise Exception(f"Query {state}: {reason}")
 
         time.sleep(0.5)
