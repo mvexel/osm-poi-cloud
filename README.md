@@ -33,6 +33,15 @@ source .env
 curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9"
 ```
 
+### Frontend map viewer (optional)
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # set VITE_API_BASE to your API Gateway URL
+npm run dev             # opens http://localhost:5173
+```
+
 ## Documentation
 
 See [WORKFLOW.md](WORKFLOW.md) for detailed documentation including:
