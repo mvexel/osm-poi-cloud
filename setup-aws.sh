@@ -15,7 +15,6 @@ COMPUTE_ENV="${PROJECT_NAME}-compute"
 JOB_QUEUE="${PROJECT_NAME}-queue"
 JOB_DEFINITION="${PROJECT_NAME}-job"
 MERGE_JOB_DEFINITION="${PROJECT_NAME}-merge-job"
-FLY_SECRET_NAME="${FLY_SECRET_NAME:-${PROJECT_NAME}-fly-token}"
 
 echo "========================================"
 echo "OSM-H3 AWS Batch Setup"
@@ -392,31 +391,6 @@ aws batch register-job-definition \
 
 echo "   Registered merge job definition ${MERGE_JOB_DEFINITION}"
 
-# ============================================
-# 8. (Optional) Store Fly.io API token in Secrets Manager
-# ============================================
-echo ""
-echo "8. Storing Fly.io token (optional)..."
-
-if [ -n "${FLY_API_TOKEN:-}" ]; then
-    # Create or update the secret
-    if aws secretsmanager describe-secret --secret-id "${FLY_SECRET_NAME}" --region "${AWS_REGION}" >/dev/null 2>&1; then
-        aws secretsmanager put-secret-value \
-            --secret-id "${FLY_SECRET_NAME}" \
-            --secret-string "${FLY_API_TOKEN}" \
-            --region "${AWS_REGION}" >/dev/null
-        echo "   Updated secret ${FLY_SECRET_NAME}"
-    else
-        aws secretsmanager create-secret \
-            --name "${FLY_SECRET_NAME}" \
-            --secret-string "${FLY_API_TOKEN}" \
-            --region "${AWS_REGION}" >/dev/null
-        echo "   Created secret ${FLY_SECRET_NAME}"
-    fi
-else
-    echo "   Skipped (set FLY_API_TOKEN to store Fly token automatically)"
-fi
-
 # Create CloudWatch log group
 aws logs create-log-group \
     --log-group-name "/aws/batch/${PROJECT_NAME}" \
@@ -437,7 +411,6 @@ echo "  - Compute Environment: ${COMPUTE_ENV}"
 echo "  - Job Queue: ${JOB_QUEUE}"
 echo "  - Job Definition: ${JOB_DEFINITION}"
 echo "  - Merge Job Definition: ${MERGE_JOB_DEFINITION}"
-echo "  - Fly secret name: ${FLY_SECRET_NAME}"
 echo ""
 echo "Next steps:"
 echo "  1. Build and push the Docker image:"
@@ -456,7 +429,6 @@ export JOB_QUEUE="${JOB_QUEUE}"
 export JOB_DEFINITION="${JOB_DEFINITION}"
 export MERGE_JOB_DEFINITION="${MERGE_JOB_DEFINITION}"
 export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID}"
-export FLY_SECRET_NAME="${FLY_SECRET_NAME}"
 EOF
 
 echo "Configuration saved to .env"
