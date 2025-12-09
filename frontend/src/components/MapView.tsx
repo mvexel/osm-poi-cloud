@@ -1,9 +1,12 @@
-import { useEffect, useRef } from 'react';
-import maplibregl, { Map as MaplibreMap } from 'maplibre-gl';
+import { useEffect, useRef, useCallback } from 'react';
+import Map, { Layer, Source } from 'react-map-gl/maplibre';
+import type { MapRef, StyleSpecification } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Bbox, PoiFeature } from '../types';
+import mapStyle from '../mapstyles/osm-bright-osmusa.json';
 
-const DEFAULT_STYLE = import.meta.env.VITE_MAP_STYLE ?? 'https://demotiles.maplibre.org/style.json';
+const DEFAULT_STYLE: StyleSpecification =
+    (import.meta.env.VITE_MAP_STYLE as StyleSpecification | undefined) || (mapStyle as StyleSpecification);
 
 interface MapViewProps {
     features: PoiFeature[];
@@ -13,102 +16,79 @@ interface MapViewProps {
 }
 
 export function MapView({ features, selectedId, onBoundsChanged, onSelect }: MapViewProps) {
-    const mapRef = useRef<MaplibreMap | null>(null);
-    const containerRef = useRef<HTMLDivElement | null>(null);
+    const mapRef = useRef<MapRef>(null);
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
 
-    useEffect(() => {
-        if (mapRef.current || !containerRef.current) return;
-
-        const map = new maplibregl.Map({
-            container: containerRef.current,
-            style: DEFAULT_STYLE,
-            center: [-98.5795, 39.8283],
-            zoom: 3.5,
-        });
-
-        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-
-        map.on('load', () => {
-            map.addSource('pois', {
-                type: 'geojson',
-                data: {
-                    type: 'FeatureCollection',
-                    features: [],
-                },
-            });
-
-            map.addLayer({
-                id: 'pois-layer',
-                type: 'circle',
-                source: 'pois',
-                paint: {
-                    'circle-radius': [
-                        'interpolate',
-                        ['linear'],
-                        ['zoom'],
-                        3, 3,
-                        12, 7
-                    ],
-                    'circle-color': '#0f766e',
-                    'circle-stroke-color': '#0d9488',
-                    'circle-stroke-width': 1,
-                    'circle-opacity': 0.8,
-                },
-            });
-
-            map.addLayer({
-                id: 'pois-selected',
-                type: 'circle',
-                source: 'pois',
-                paint: {
-                    'circle-radius': 9,
-                    'circle-color': '#eab308',
-                    'circle-stroke-color': '#854d0e',
-                    'circle-stroke-width': 2,
-                    'circle-opacity': 0.9,
-                },
-                filter: ['==', ['get', 'id'], 'none'],
-            });
-
-            const updateBounds = () => {
-                const b = map.getBounds();
-                onBoundsChanged([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
-            };
-
-            map.on('moveend', updateBounds);
-            updateBounds();
-        });
-
-        map.on('click', (e) => {
-            const hits = map.queryRenderedFeatures(e.point, { layers: ['pois-layer'] });
-            const hit = hits[0];
-            if (hit && hit.properties) {
-                const selected = features.find((f) => f.properties.osm_id === hit.properties.osm_id);
-                if (selected) onSelect(selected);
-            } else {
-                onSelect(null);
-            }
-        });
-
-        mapRef.current = map;
-
-        return () => {
-            map.remove();
-            mapRef.current = null;
-        };
-    }, [onBoundsChanged, onSelect]);
-
-    useEffect(() => {
-        const map = mapRef.current;
+    const handleMoveEnd = useCallback(() => {
+        const map = mapRef.current?.getMap();
         if (!map) return;
-        const source = map.getSource('pois') as maplibregl.GeoJSONSource | undefined;
-        if (source) {
-            source.setData({ type: 'FeatureCollection', features });
-        }
-        map.setFilter('pois-selected', ['==', ['get', 'osm_id'], selectedId ?? 'none']);
-    }, [features, selectedId]);
+        const b = map.getBounds();
+        onBoundsChanged([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    }, [onBoundsChanged]);
 
-    return <div ref={containerRef} className="map" />;
+    const handleClick = useCallback(
+        (event: any) => {
+            const map = mapRef.current?.getMap();
+            if (!map) return;
+            const hits = map.queryRenderedFeatures(event.point, { layers: ['pois-layer'] });
+            const hit = hits[0];
+            if (hit?.properties) {
+                const selected = features.find((f) => f.properties.osm_id === hit.properties.osm_id);
+                if (selected) {
+                    onSelect(selected);
+                    return;
+                }
+            }
+            onSelect(null);
+        },
+        [features, onSelect]
+    );
+
+    const geojsonData = {
+        type: 'FeatureCollection' as const,
+        features,
+    };
+
+    return (
+        <Map
+            ref={mapRef}
+            initialViewState={{
+                longitude: isMobile ? -86.9023 : -98.5795,
+                latitude: isMobile ? 32.3182 : 39.8283,
+                zoom: isMobile ? 6 : 3.5,
+            }}
+            style={{ width: '100%', height: '100%' }}
+            mapStyle={DEFAULT_STYLE}
+            onMoveEnd={handleMoveEnd}
+            onClick={handleClick}
+        >
+            <Source id="pois" type="geojson" data={geojsonData}>
+                <Layer
+                    id="pois-layer"
+                    type="circle"
+                    paint={{
+                        'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 3, 12, 7],
+                        'circle-color': '#0f766e',
+                        'circle-stroke-color': '#0d9488',
+                        'circle-stroke-width': 1,
+                        'circle-opacity': 0.8,
+                    }}
+                />
+                <Layer
+                    id="pois-selected"
+                    type="circle"
+                    paint={{
+                        'circle-radius': 9,
+                        'circle-color': '#eab308',
+                        'circle-stroke-color': '#854d0e',
+                        'circle-stroke-width': 2,
+                        'circle-opacity': 0.9,
+                    }}
+                    filter={['==', ['get', 'osm_id'], selectedId ?? 'none']}
+                />
+            </Source>
+        </Map>
+    );
 }
 
 export default MapView;
