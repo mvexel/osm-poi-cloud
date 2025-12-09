@@ -587,28 +587,30 @@ def process_geojson_to_parquet(
         return None
 
     # Define schema
-    schema = pa.schema([
-        ("osm_id", pa.string()),
-        ("osm_type", pa.string()),
-        ("name", pa.string()),
-        ("class", pa.string()),
-        ("lon", pa.float64()),
-        ("lat", pa.float64()),
-        ("state", pa.string()),
-        ("amenity", pa.string()),
-        ("shop", pa.string()),
-        ("leisure", pa.string()),
-        ("tourism", pa.string()),
-        ("cuisine", pa.string()),
-        ("opening_hours", pa.string()),
-        ("phone", pa.string()),
-        ("website", pa.string()),
-        ("brand", pa.string()),
-        ("operator", pa.string()),
-        ("tags", pa.string()),
-        ("lon_bucket", pa.int32()),
-        ("lat_bucket", pa.int32()),
-    ])
+    schema = pa.schema(
+        [
+            ("osm_id", pa.string()),
+            ("osm_type", pa.string()),
+            ("name", pa.string()),
+            ("class", pa.string()),
+            ("lon", pa.float64()),
+            ("lat", pa.float64()),
+            ("state", pa.string()),
+            ("amenity", pa.string()),
+            ("shop", pa.string()),
+            ("leisure", pa.string()),
+            ("tourism", pa.string()),
+            ("cuisine", pa.string()),
+            ("opening_hours", pa.string()),
+            ("phone", pa.string()),
+            ("website", pa.string()),
+            ("brand", pa.string()),
+            ("operator", pa.string()),
+            ("tags", pa.string()),
+            ("lon_bucket", pa.int32()),
+            ("lat_bucket", pa.int32()),
+        ]
+    )
 
     # Create table from records
     table = pa.Table.from_pylist(records, schema=schema)
