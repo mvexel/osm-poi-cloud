@@ -6,13 +6,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-# Load configuration
-if [ -f .env ]; then
-    source .env
-else
-    echo "ERROR: .env file not found. Run setup-aws.sh first."
-    exit 1
-fi
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/scripts/common.sh"
+
+load_env
+require_env AWS_REGION JOB_QUEUE S3_BUCKET
 
 echo "========================================"
 echo "OSM-H3 Batch Job Monitor"

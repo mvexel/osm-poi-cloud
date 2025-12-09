@@ -6,21 +6,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-# Load configuration
-if [ -f .env ]; then
-    source .env
-else
-    echo "ERROR: .env file not found. Run setup-aws.sh first."
-    exit 1
-fi
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/scripts/common.sh"
+
+load_env
+require_env ECR_URI AWS_REGION AWS_ACCOUNT_ID
+require_command docker
 
 echo "Building Docker image..."
 docker buildx build --platform linux/amd64 -t "${ECR_URI}:latest" batch/
 
 echo ""
 echo "Logging into ECR..."
-aws ecr get-login-password --region "${AWS_REGION}" | \
-    docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+aws_ecr_login
 
 echo ""
 echo "Pushing image to ECR..."

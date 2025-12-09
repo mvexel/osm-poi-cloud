@@ -6,13 +6,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-# Load configuration
-if [ -f .env ]; then
-    source .env
-else
-    echo "ERROR: .env file not found. Run setup-aws.sh first."
-    exit 1
-fi
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/scripts/common.sh"
+
+load_env
+require_env AWS_REGION S3_BUCKET AWS_ACCOUNT_ID
+require_command docker jq
 
 TILES_ECR_REPO="osm-h3-tiles"
 TILES_JOB_DEFINITION="osm-h3-tiles-job"
@@ -46,8 +45,7 @@ docker buildx build --platform linux/amd64 -t "${TILES_ECR_URI}:latest" tiles/
 
 echo ""
 echo "Logging into ECR..."
-aws ecr get-login-password --region "${AWS_REGION}" | \
-    docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+aws_ecr_login
 
 echo ""
 echo "Pushing tiles image to ECR..."
