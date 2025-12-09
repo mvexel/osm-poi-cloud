@@ -23,9 +23,10 @@ athena = boto3.client("athena")
 
 
 def lambda_handler(event, context):
-    """Main Lambda handler for API Gateway proxy integration."""
-    path = event.get("path", "/")
-    method = event.get("httpMethod", "GET")
+    """Main Lambda handler for API Gateway HTTP API (payload format 2.0)."""
+    # HTTP API v2 format uses rawPath and requestContext.http
+    path = event.get("rawPath", event.get("path", "/"))
+    method = event.get("requestContext", {}).get("http", {}).get("method", event.get("httpMethod", "GET"))
     params = event.get("queryStringParameters") or {}
 
     # CORS headers
