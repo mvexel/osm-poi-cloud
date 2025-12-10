@@ -1,3 +1,4 @@
+import { getClassLabel } from '../constants/poiClasses';
 import type { ClassItem, PoiFeature } from '../types';
 
 interface SidebarProps {
@@ -7,18 +8,35 @@ interface SidebarProps {
     selected?: PoiFeature | null;
     isLoading: boolean;
     count: number;
+    apiEnabled: boolean;
+    pmtilesOnly: boolean;
 }
 
-export function Sidebar({ classes, selectedClass, onClassChange, selected, isLoading, count }: SidebarProps) {
+export function Sidebar({
+    classes,
+    selectedClass,
+    onClassChange,
+    selected,
+    isLoading,
+    count,
+    apiEnabled,
+    pmtilesOnly,
+}: SidebarProps) {
     return (
         <div className="sidebar">
             <div className="panel">
                 <div className="panel-header">
                     <div>
                         <h1>OSM POI Explorer</h1>
-                        <p className="muted">Browse POIs from the AWS-backed API. Pan/zoom to load.</p>
+                        <p className="muted">
+                            {pmtilesOnly
+                                ? 'Browsing PMTiles snapshot. Filtering happens client-side.'
+                                : 'Browse POIs from the AWS-backed API. Pan/zoom to load.'}
+                        </p>
                     </div>
-                    <div className="badge">{isLoading ? 'Loading…' : `${count} shown`}</div>
+                    <div className="badge">
+                        {apiEnabled ? (isLoading ? 'Loading…' : `${count} shown`) : pmtilesOnly ? 'PMTiles' : 'Offline'}
+                    </div>
                 </div>
 
                 <label className="label" htmlFor="class-filter">Class filter</label>
@@ -31,7 +49,8 @@ export function Sidebar({ classes, selectedClass, onClassChange, selected, isLoa
                     <option value="">All classes</option>
                     {classes.map((c) => (
                         <option key={c.class} value={c.class}>
-                            {c.class} ({c.count})
+                            {getClassLabel(c.class)}
+                            {apiEnabled ? ` (${c.count})` : ''}
                         </option>
                     ))}
                 </select>
@@ -47,7 +66,7 @@ export function Sidebar({ classes, selectedClass, onClassChange, selected, isLoa
                         </div>
                         <div className="detail-row">
                             <span className="detail-label">Class</span>
-                            <span>{selected.properties.class}</span>
+                            <span>{getClassLabel(selected.properties.class)}</span>
                         </div>
                         <div className="detail-row">
                             <span className="detail-label">State</span>

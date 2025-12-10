@@ -16,7 +16,7 @@ AWS Batch (Spot) → Parquet/S3 → Athena → API Gateway + Lambda
 ## Quick Start
 
 ```bash
-# 1. Setup AWS infrastructure
+# 1. Setup AWS infrastructure (.env is generated here)
 ./setup-aws.sh
 
 # 2. Build and push Docker image
@@ -28,9 +28,14 @@ AWS Batch (Spot) → Parquet/S3 → Athena → API Gateway + Lambda
 # 4. Run batch jobs for all states
 ./run-all-states.sh
 
-# 5. Query the API
+# 5. (Optional) Setup CloudFront + tiles job definition
+./setup-tiles.sh
+
+# 6. Query the API / generate PMTiles
 source .env
 curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9"
+# Submit PMTiles Batch job after parquet files are ready
+./generate-tiles.sh
 ```
 
 ### Frontend map viewer (optional)
@@ -38,9 +43,14 @@ curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9"
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # set VITE_API_BASE to your API Gateway URL
+cp .env.example .env   # set VITE_API_BASE to your API Gateway URL (optional if streaming PMTiles only)
+nano .env              # set VITE_PMTILES_URL=https://<cloudfront>/pois.pmtiles to stream tiles client-side
 npm run dev             # opens http://localhost:5173
 ```
+
+When `VITE_PMTILES_URL` is configured, the frontend streams points directly from the PMTiles archive and
+skips live API calls (counts come from the API so they stay hidden, but the class dropdown still filters locally).
+Clear `VITE_PMTILES_URL` to return to API-driven mode.
 
 ## Documentation
 
@@ -50,6 +60,8 @@ See [WORKFLOW.md](WORKFLOW.md) for detailed documentation including:
 - POI categories
 - Cost breakdown
 - Troubleshooting
+
+Planning the Infrastructure-as-Code migration? See [docs/iac-plan.md](docs/iac-plan.md).
 
 ## Project Structure
 
@@ -62,8 +74,12 @@ osm-h3/
 ├── athena/                   # Athena + Lambda API
 │   ├── create_table.sql
 │   └── lambda_handler.py
+├── scripts/
+│   └── common.sh             # Shared helpers (env loading, AWS/Docker guards)
 ├── setup-aws.sh              # AWS Batch infrastructure
 ├── setup-athena-api.sh       # Athena + API Gateway setup
+├── setup-tiles.sh            # Tiles ECR/Batch + CloudFront
+├── generate-tiles.sh         # Submit PMTiles Batch job
 ├── build-and-push.sh         # Build container image
 ├── run-all-states.sh         # Submit batch jobs
 ├── monitor.sh                # Monitor job progress

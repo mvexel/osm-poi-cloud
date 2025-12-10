@@ -10,15 +10,16 @@
     },
     "dependencies": {
         "@tanstack/react-query": "^5.45.0",
-        "maplibre-gl": "^3.6.1",
+        "maplibre-gl": "^5.14.0",
+        "pmtiles": "^4.3.0",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
-        "react-map-gl": "^7.1.7"
+        "react-map-gl": "^8.1.0"
     },
     "devDependencies": {
-        "@vitejs/plugin-react": "^5.0.0",
         "@types/react": "^18.2.15",
         "@types/react-dom": "^18.2.7",
+        "@vitejs/plugin-react": "^5.0.0",
         "typescript": "^5.3.3",
         "vite": "^5.1.0"
     }

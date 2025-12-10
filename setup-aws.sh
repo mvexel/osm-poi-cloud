@@ -178,16 +178,18 @@ else
     aws iam create-role \
         --role-name "${JOB_ROLE}" \
         --assume-role-policy-document file:///tmp/ecs-task-trust-policy.json
-    aws iam put-role-policy \
-        --role-name "${JOB_ROLE}" \
-        --policy-name "S3Access" \
-        --policy-document file:///tmp/s3-access-policy.json
     # Also attach basic execution role for CloudWatch logs
     aws iam attach-role-policy \
         --role-name "${JOB_ROLE}" \
         --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
     echo "   Created ${JOB_ROLE}"
 fi
+
+# Always update inline S3 access policy in case the bucket changed
+aws iam put-role-policy \
+    --role-name "${JOB_ROLE}" \
+    --policy-name "S3Access" \
+    --policy-document file:///tmp/s3-access-policy.json
 
 # ============================================
 # 4. Get Default VPC and Subnets
@@ -429,6 +431,7 @@ export JOB_QUEUE="${JOB_QUEUE}"
 export JOB_DEFINITION="${JOB_DEFINITION}"
 export MERGE_JOB_DEFINITION="${MERGE_JOB_DEFINITION}"
 export AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID}"
+export JOB_ROLE="${JOB_ROLE}"
 EOF
 
 echo "Configuration saved to .env"

@@ -16,6 +16,12 @@ require_command docker jq
 TILES_ECR_REPO="osm-h3-tiles"
 TILES_JOB_DEFINITION="osm-h3-tiles-job"
 
+DEFAULT_JOB_ROLE="${JOB_ROLE:-osm-h3-job-role}"
+JOB_ROLE_NAME="${TILES_JOB_ROLE:-${DEFAULT_JOB_ROLE}}"
+EXECUTION_ROLE_NAME="${TILES_EXECUTION_ROLE:-${JOB_ROLE_NAME}}"
+JOB_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${JOB_ROLE_NAME}"
+EXECUTION_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/${EXECUTION_ROLE_NAME}"
+
 echo "========================================"
 echo "Setting up PMTiles + CloudFront"
 echo "========================================"
@@ -67,8 +73,8 @@ JOB_DEF_JSON=$(cat <<EOF
         "environment": [
             {"name": "S3_BUCKET", "value": "${S3_BUCKET}"}
         ],
-        "jobRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/osm-h3-batch-role",
-        "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/osm-h3-batch-execution-role",
+        "jobRoleArn": "${JOB_ROLE_ARN}",
+        "executionRoleArn": "${EXECUTION_ROLE_ARN}",
         "logConfiguration": {
             "logDriver": "awslogs",
             "options": {

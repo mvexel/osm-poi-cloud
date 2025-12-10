@@ -34,10 +34,14 @@ Process all US states/territories to Parquet, query via Athena + API Gateway.
 # 4. Run all 56 state jobs (~2-3 hours, ~$3-5)
 ./run-all-states.sh
 
-# 5. Test the API
+# 5. (Optional) Setup CloudFront + PMTiles batch definition (~5 min)
+./setup-tiles.sh
+
+# 6. Test the API and generate PMTiles
 source .env
 curl "${API_ENDPOINT}/health"
 curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9"
+./generate-tiles.sh    # kicks off PMTiles job once parquet files exist
 ```
 
 ## Detailed Steps
@@ -50,7 +54,7 @@ Creates: S3 bucket, ECR repo, IAM roles, Batch compute environment, job queue, j
 ./setup-aws.sh
 ```
 
-This creates a `.env` file with configuration for subsequent scripts.
+This creates a `.env` file with configuration for subsequent scripts. Every helper script sources `scripts/common.sh`, which loads `.env`, verifies required variables/commands, and centralizes AWS/Docker helpers.
 
 ### Step 2: Build Container
 
@@ -110,6 +114,9 @@ curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9&class=restaurant"
 
 # List available classes
 curl "${API_ENDPOINT}/classes"
+
+# Generate PMTiles bundle (runs via AWS Batch tiles job)
+./generate-tiles.sh
 ```
 
 ## API Endpoints
@@ -187,8 +194,12 @@ osm-h3/
 ├── athena/                   # Athena + Lambda API
 │   ├── create_table.sql      # Athena table definition
 │   └── lambda_handler.py     # API Lambda function
+├── scripts/
+│   └── common.sh             # Shared helpers (.env loading, command guards)
 ├── setup-aws.sh              # Create AWS Batch infrastructure
 ├── setup-athena-api.sh       # Create Athena + Lambda + API Gateway
+├── setup-tiles.sh            # Create tiles ECR repo + CloudFront distribution
+├── generate-tiles.sh         # Submit PMTiles AWS Batch job
 ├── build-and-push.sh         # Build & push Docker image
 ├── run-all-states.sh         # Submit Batch jobs
 ├── monitor.sh                # Watch job progress
