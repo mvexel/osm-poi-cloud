@@ -7,8 +7,6 @@ Environment variables:
   - S3_BUCKET: Output S3 bucket name
 """
 
-import json
-import math
 import os
 import subprocess
 import sys
@@ -16,348 +14,7 @@ import tempfile
 from pathlib import Path
 
 import boto3
-import pyarrow as pa
-import pyarrow.parquet as pq
-
-# POI category mapping (extracted from lua/poi_mapping.lua)
-POI_MAPPING = [
-    {
-        "class": "restaurant",
-        "tags": [
-            ("amenity", "restaurant"),
-            ("amenity", "food_court"),
-            ("amenity", "diner"),
-            ("amenity", "bbq"),
-        ],
-    },
-    {
-        "class": "cafe_bakery",
-        "tags": [("amenity", "cafe"), ("amenity", "coffee_shop"), ("amenity", "tea")],
-    },
-    {
-        "class": "bar_pub",
-        "tags": [("amenity", "bar"), ("amenity", "pub"), ("amenity", "biergarten")],
-    },
-    {
-        "class": "fast_food",
-        "tags": [
-            ("amenity", "fast_food"),
-            ("amenity", "food_truck"),
-            ("amenity", "ice_cream"),
-            ("amenity", "street_vendor"),
-        ],
-    },
-    {
-        "class": "ice_cream",
-        "tags": [
-            ("amenity", "ice_cream"),
-            ("shop", "ice_cream"),
-            ("shop", "dessert"),
-            ("shop", "frozen_yogurt"),
-        ],
-    },
-    {
-        "class": "grocery",
-        "tags": [
-            ("shop", "supermarket"),
-            ("shop", "convenience"),
-            ("shop", "grocery"),
-            ("shop", "marketplace"),
-            ("amenity", "marketplace"),
-        ],
-    },
-    {
-        "class": "specialty_food",
-        "tags": [
-            ("shop", "bakery"),
-            ("shop", "butcher"),
-            ("shop", "cheese"),
-            ("shop", "confectionery"),
-            ("shop", "chocolate"),
-            ("shop", "deli"),
-            ("shop", "fishmonger"),
-            ("shop", "frozen_food"),
-            ("shop", "greengrocer"),
-            ("shop", "health_food"),
-            ("shop", "organic"),
-            ("shop", "pastry"),
-            ("shop", "tea"),
-            ("shop", "coffee"),
-        ],
-    },
-    {
-        "class": "retail",
-        "tags": [
-            ("shop", "mall"),
-            ("shop", "department_store"),
-            ("shop", "car"),
-            ("shop", "clothes"),
-            ("shop", "fashion"),
-            ("shop", "shoes"),
-            ("shop", "electronics"),
-            ("shop", "computer"),
-            ("shop", "hardware"),
-            ("shop", "doityourself"),
-            ("shop", "furniture"),
-            ("shop", "jewelry"),
-            ("shop", "toys"),
-            ("shop", "books"),
-            ("shop", "gift"),
-            ("shop", "cosmetics"),
-        ],
-    },
-    {
-        "class": "personal_services",
-        "tags": [
-            ("amenity", "spa"),
-            ("amenity", "sauna"),
-            ("amenity", "hairdresser"),
-            ("amenity", "beauty_salon"),
-            ("amenity", "laundry"),
-            ("amenity", "dry_cleaning"),
-            ("shop", "hairdresser"),
-            ("shop", "beauty"),
-            ("shop", "massage"),
-        ],
-    },
-    {
-        "class": "professional_services",
-        "tags": [
-            ("amenity", "coworking_space"),
-            ("amenity", "conference_centre"),
-            ("office", "company"),
-            ("office", "lawyer"),
-            ("office", "architect"),
-            ("office", "estate_agent"),
-            ("office", "accountant"),
-        ],
-    },
-    {
-        "class": "finance",
-        "tags": [
-            ("amenity", "bank"),
-            ("amenity", "atm"),
-            ("amenity", "bureau_de_change"),
-            ("amenity", "money_transfer"),
-        ],
-    },
-    {
-        "class": "lodging",
-        "tags": [
-            ("tourism", "hotel"),
-            ("tourism", "guest_house"),
-            ("tourism", "hostel"),
-            ("tourism", "motel"),
-            ("tourism", "apartment"),
-            ("tourism", "chalet"),
-            ("tourism", "alpine_hut"),
-            ("tourism", "camp_site"),
-            ("tourism", "caravan_site"),
-        ],
-    },
-    {
-        "class": "transport",
-        "tags": [
-            ("amenity", "bus_station"),
-            ("railway", "station"),
-            ("railway", "halt"),
-            ("railway", "stop"),
-            ("railway", "tram_stop"),
-            ("public_transport", "station"),
-            ("aeroway", "aerodrome"),
-            ("aeroway", "terminal"),
-            ("amenity", "ferry_terminal"),
-        ],
-    },
-    {
-        "class": "auto_services",
-        "tags": [
-            ("amenity", "fuel"),
-            ("amenity", "charging_station"),
-            ("amenity", "car_wash"),
-            ("amenity", "car_rental"),
-            ("amenity", "car_repair"),
-            ("shop", "car_repair"),
-            ("shop", "tyres"),
-        ],
-    },
-    {
-        "class": "parking",
-        "tags": [
-            ("amenity", "parking"),
-            ("amenity", "bicycle_parking"),
-            ("amenity", "motorcycle_parking"),
-        ],
-    },
-    {
-        "class": "healthcare",
-        "tags": [
-            ("amenity", "hospital"),
-            ("amenity", "clinic"),
-            ("amenity", "doctors"),
-            ("amenity", "dentist"),
-            ("amenity", "pharmacy"),
-            ("amenity", "ambulance_station"),
-        ],
-    },
-    {
-        "class": "education",
-        "tags": [
-            ("amenity", "school"),
-            ("amenity", "kindergarten"),
-            ("amenity", "college"),
-            ("amenity", "university"),
-            ("amenity", "music_school"),
-            ("amenity", "language_school"),
-            ("amenity", "library"),
-        ],
-    },
-    {
-        "class": "government",
-        "tags": [
-            ("amenity", "townhall"),
-            ("amenity", "courthouse"),
-            ("amenity", "police"),
-            ("amenity", "fire_station"),
-            ("amenity", "post_office"),
-            ("amenity", "embassy"),
-            ("office", "government"),
-        ],
-    },
-    {
-        "class": "community",
-        "tags": [
-            ("amenity", "community_centre"),
-            ("amenity", "social_centre"),
-            ("amenity", "youth_centre"),
-            ("amenity", "social_facility"),
-            ("amenity", "shelter"),
-        ],
-    },
-    {
-        "class": "religious",
-        "tags": [
-            ("amenity", "place_of_worship"),
-            ("amenity", "church"),
-            ("amenity", "mosque"),
-            ("amenity", "temple"),
-            ("amenity", "synagogue"),
-        ],
-    },
-    {
-        "class": "culture",
-        "tags": [
-            ("tourism", "museum"),
-            ("tourism", "gallery"),
-            ("amenity", "arts_centre"),
-            ("amenity", "theatre"),
-            ("amenity", "concert_hall"),
-            ("amenity", "planetarium"),
-        ],
-    },
-    {
-        "class": "entertainment",
-        "tags": [
-            ("amenity", "cinema"),
-            ("amenity", "nightclub"),
-            ("amenity", "casino"),
-            ("amenity", "bowling_alley"),
-            ("amenity", "amusement_arcade"),
-            ("leisure", "bowling_alley"),
-            ("leisure", "escape_game"),
-        ],
-    },
-    {
-        "class": "sports_fitness",
-        "tags": [
-            ("leisure", "sports_centre"),
-            ("leisure", "fitness_centre"),
-            ("leisure", "gym"),
-            ("leisure", "swimming_pool"),
-            ("leisure", "stadium"),
-            ("leisure", "pitch"),
-            ("leisure", "ice_rink"),
-            ("leisure", "golf_course"),
-        ],
-    },
-    {
-        "class": "parks_outdoors",
-        "tags": [
-            ("leisure", "park"),
-            ("leisure", "garden"),
-            ("leisure", "nature_reserve"),
-            ("leisure", "playground"),
-            ("leisure", "dog_park"),
-            ("tourism", "picnic_site"),
-            ("tourism", "viewpoint"),
-            ("natural", "beach"),
-        ],
-    },
-    {
-        "class": "landmark",
-        "tags": [
-            ("tourism", "attraction"),
-            ("tourism", "information"),
-            ("historic", "monument"),
-            ("historic", "memorial"),
-            ("historic", "castle"),
-            ("historic", "ruins"),
-            ("man_made", "lighthouse"),
-            ("man_made", "tower"),
-        ],
-    },
-    {
-        "class": "animal_services",
-        "tags": [
-            ("amenity", "veterinary"),
-            ("amenity", "animal_boarding"),
-            ("amenity", "animal_shelter"),
-            ("shop", "pet"),
-        ],
-    },
-]
-
-# Build lookup for fast classification
-POI_LOOKUP = {}
-for cat in POI_MAPPING:
-    for key, value in cat["tags"]:
-        if key not in POI_LOOKUP:
-            POI_LOOKUP[key] = []
-        POI_LOOKUP[key].append((value, cat["class"]))
-
-
-def classify_poi(tags: dict) -> str | None:
-    """Classify a POI based on its OSM tags."""
-    for key in [
-        "amenity",
-        "shop",
-        "leisure",
-        "tourism",
-        "office",
-        "railway",
-        "aeroway",
-        "historic",
-        "man_made",
-        "natural",
-        "public_transport",
-    ]:
-        if key in tags and key in POI_LOOKUP:
-            value = tags[key]
-            for expected_value, poi_class in POI_LOOKUP[key]:
-                if value == expected_value:
-                    return poi_class
-
-    # Fallback to wildcard matches
-    if "shop" in tags:
-        return "retail"
-    if "healthcare" in tags:
-        return "healthcare"
-
-    # Generic fallback
-    if any(k in tags for k in ["amenity", "shop", "leisure", "tourism"]):
-        return "misc"
-
-    return None
+import duckdb
 
 
 def download_pbf(region_path: str, output_dir: Path) -> Path:
@@ -419,11 +76,10 @@ def filter_pbf(input_pbf: Path, output_dir: Path) -> Path:
 
 
 def pbf_to_geojson(pbf_path: Path, output_dir: Path) -> Path:
-    """Convert PBF to GeoJSON using osmium export."""
-    output_path = output_dir / f"{pbf_path.stem}.geojsonseq"
+    """Convert PBF to newline-delimited GeoJSON using osmium export."""
+    output_path = output_dir / f"{pbf_path.stem}.ndjson"
 
     print("Converting to GeoJSON...")
-    # Export all geometry types - we'll compute centroids for polygons in Python
     subprocess.run(
         [
             "osmium",
@@ -433,192 +89,218 @@ def pbf_to_geojson(pbf_path: Path, output_dir: Path) -> Path:
             str(output_path),
             "-f",
             "geojsonseq",
+            "-x",
+            "print_record_separator=false",
             "-u",
             "type_id",
+            "--geometry-types=point,polygon",
         ],
         check=True,
     )
 
     print(f"Converted to {output_path.stat().st_size / 1024 / 1024:.1f} MB")
-    print(f"file: {output_path}")
-
     return output_path
 
 
 def process_geojson_to_parquet(
     geojson_path: Path, region_name: str, output_dir: Path
 ) -> Path:
-    """Process GeoJSON to Parquet with partition columns for Athena."""
+    """Process GeoJSON to Parquet using DuckDB with spatial extension."""
     output_path = output_dir / f"{region_name}.parquet"
 
-    print("Processing GeoJSON to Parquet...")
+    print("Processing GeoJSON to Parquet with DuckDB...")
 
-    # Collect all records
-    records = []
-    total_pois = 0
-    skipped_no_name = 0
-    skipped_no_class = 0
-    skipped_no_geom = 0
+    conn = duckdb.connect()
+    conn.sql("LOAD spatial;")
 
-    with open(geojson_path, "r") as f:
-        # Debug: print first few lines to see format
-        first_lines = []
-        for i, line in enumerate(f):
-            if i < 3:
-                first_lines.append(line[:500])
-            else:
-                break
-        print(f"  First few lines of GeoJSON:")
-        for line in first_lines:
-            print(f"    {line[:200]}...")
+    # Debug: check what columns we're getting
+    sample = conn.sql(f"""
+        SELECT *
+        FROM read_json_auto('{geojson_path}', maximum_object_size=10485760)
+        LIMIT 1
+    """)
+    print(f"  Columns detected: {sample.columns}")
+    print(f"  Sample row: {sample.fetchone()}")
 
-        # Reset file position
-        f.seek(0)
+    # SQL query with POI classification and centroid computation
+    query = f"""
+    COPY (
+        WITH raw_features AS (
+            SELECT
+                id as osm_id,
+                CAST(properties['@type'] AS VARCHAR) as osm_type,
+                CAST(properties['name'] AS VARCHAR) as name,
+                CAST(properties['amenity'] AS VARCHAR) as amenity,
+                CAST(properties['shop'] AS VARCHAR) as shop,
+                CAST(properties['leisure'] AS VARCHAR) as leisure,
+                CAST(properties['tourism'] AS VARCHAR) as tourism,
+                CAST(properties['office'] AS VARCHAR) as office,
+                CAST(properties['healthcare'] AS VARCHAR) as healthcare,
+                CAST(properties['railway'] AS VARCHAR) as railway,
+                CAST(properties['aeroway'] AS VARCHAR) as aeroway,
+                CAST(properties['historic'] AS VARCHAR) as historic,
+                CAST(properties['man_made'] AS VARCHAR) as man_made,
+                CAST(properties['natural'] AS VARCHAR) as "natural",
+                CAST(properties['public_transport'] AS VARCHAR) as public_transport,
+                CAST(properties['cuisine'] AS VARCHAR) as cuisine,
+                CAST(properties['opening_hours'] AS VARCHAR) as opening_hours,
+                CAST(properties['phone'] AS VARCHAR) as phone,
+                CAST(properties['website'] AS VARCHAR) as website,
+                CAST(properties['brand'] AS VARCHAR) as brand,
+                CAST(properties['operator'] AS VARCHAR) as "operator",
+                ST_Centroid(ST_GeomFromGeoJSON(to_json(geometry))) as centroid
+            FROM read_json_auto('{geojson_path}', maximum_object_size=10485760)
+            WHERE properties['name'] IS NOT NULL
+              AND geometry IS NOT NULL
+        ),
+        classified AS (
+            SELECT
+                *,
+                CASE
+                    -- Restaurant
+                    WHEN amenity IN ('restaurant', 'food_court', 'diner', 'bbq') THEN 'restaurant'
+                    -- Cafe/Bakery
+                    WHEN amenity IN ('cafe', 'coffee_shop', 'tea') THEN 'cafe_bakery'
+                    -- Bar/Pub
+                    WHEN amenity IN ('bar', 'pub', 'biergarten') THEN 'bar_pub'
+                    -- Fast Food
+                    WHEN amenity IN ('fast_food', 'food_truck', 'ice_cream', 'street_vendor') THEN 'fast_food'
+                    -- Ice Cream (shop takes precedence after amenity ice_cream caught above)
+                    WHEN shop IN ('ice_cream', 'dessert', 'frozen_yogurt') THEN 'ice_cream'
+                    -- Grocery
+                    WHEN shop IN ('supermarket', 'convenience', 'grocery', 'marketplace') THEN 'grocery'
+                    WHEN amenity = 'marketplace' THEN 'grocery'
+                    -- Specialty Food
+                    WHEN shop IN ('bakery', 'butcher', 'cheese', 'confectionery', 'chocolate',
+                                  'deli', 'fishmonger', 'frozen_food', 'greengrocer',
+                                  'health_food', 'organic', 'pastry', 'tea', 'coffee') THEN 'specialty_food'
+                    -- Retail
+                    WHEN shop IN ('mall', 'department_store', 'car', 'clothes', 'fashion',
+                                  'shoes', 'electronics', 'computer', 'hardware', 'doityourself',
+                                  'furniture', 'jewelry', 'toys', 'books', 'gift', 'cosmetics') THEN 'retail'
+                    -- Personal Services
+                    WHEN amenity IN ('spa', 'sauna', 'hairdresser', 'beauty_salon', 'laundry', 'dry_cleaning') THEN 'personal_services'
+                    WHEN shop IN ('hairdresser', 'beauty', 'massage') THEN 'personal_services'
+                    -- Professional Services
+                    WHEN amenity IN ('coworking_space', 'conference_centre') THEN 'professional_services'
+                    WHEN office IN ('company', 'lawyer', 'architect', 'estate_agent', 'accountant') THEN 'professional_services'
+                    -- Finance
+                    WHEN amenity IN ('bank', 'atm', 'bureau_de_change', 'money_transfer') THEN 'finance'
+                    -- Lodging
+                    WHEN tourism IN ('hotel', 'guest_house', 'hostel', 'motel', 'apartment',
+                                     'chalet', 'alpine_hut', 'camp_site', 'caravan_site') THEN 'lodging'
+                    -- Transport
+                    WHEN amenity IN ('bus_station', 'ferry_terminal') THEN 'transport'
+                    WHEN railway IN ('station', 'halt', 'stop', 'tram_stop') THEN 'transport'
+                    WHEN public_transport = 'station' THEN 'transport'
+                    WHEN aeroway IN ('aerodrome', 'terminal') THEN 'transport'
+                    -- Auto Services
+                    WHEN amenity IN ('fuel', 'charging_station', 'car_wash', 'car_rental', 'car_repair') THEN 'auto_services'
+                    WHEN shop IN ('car_repair', 'tyres') THEN 'auto_services'
+                    -- Parking
+                    WHEN amenity IN ('parking', 'bicycle_parking', 'motorcycle_parking') THEN 'parking'
+                    -- Healthcare
+                    WHEN amenity IN ('hospital', 'clinic', 'doctors', 'dentist', 'pharmacy', 'ambulance_station') THEN 'healthcare'
+                    WHEN healthcare IS NOT NULL THEN 'healthcare'
+                    -- Education
+                    WHEN amenity IN ('school', 'kindergarten', 'college', 'university',
+                                     'music_school', 'language_school', 'library') THEN 'education'
+                    -- Government
+                    WHEN amenity IN ('townhall', 'courthouse', 'police', 'fire_station',
+                                     'post_office', 'embassy') THEN 'government'
+                    WHEN office = 'government' THEN 'government'
+                    -- Community
+                    WHEN amenity IN ('community_centre', 'social_centre', 'youth_centre',
+                                     'social_facility', 'shelter') THEN 'community'
+                    -- Religious
+                    WHEN amenity IN ('place_of_worship', 'church', 'mosque', 'temple', 'synagogue') THEN 'religious'
+                    -- Culture
+                    WHEN tourism IN ('museum', 'gallery') THEN 'culture'
+                    WHEN amenity IN ('arts_centre', 'theatre', 'concert_hall', 'planetarium') THEN 'culture'
+                    -- Entertainment
+                    WHEN amenity IN ('cinema', 'nightclub', 'casino', 'bowling_alley', 'amusement_arcade') THEN 'entertainment'
+                    WHEN leisure IN ('bowling_alley', 'escape_game') THEN 'entertainment'
+                    -- Sports/Fitness
+                    WHEN leisure IN ('sports_centre', 'fitness_centre', 'gym', 'swimming_pool',
+                                     'stadium', 'pitch', 'ice_rink', 'golf_course') THEN 'sports_fitness'
+                    -- Parks/Outdoors
+                    WHEN leisure IN ('park', 'garden', 'nature_reserve', 'playground', 'dog_park') THEN 'parks_outdoors'
+                    WHEN tourism IN ('picnic_site', 'viewpoint') THEN 'parks_outdoors'
+                    WHEN "natural" = 'beach' THEN 'parks_outdoors'
+                    -- Landmark
+                    WHEN tourism IN ('attraction', 'information') THEN 'landmark'
+                    WHEN historic IN ('monument', 'memorial', 'castle', 'ruins') THEN 'landmark'
+                    WHEN man_made IN ('lighthouse', 'tower') THEN 'landmark'
+                    -- Animal Services
+                    WHEN amenity IN ('veterinary', 'animal_boarding', 'animal_shelter') THEN 'animal_services'
+                    WHEN shop = 'pet' THEN 'animal_services'
+                    -- Fallbacks
+                    WHEN shop IS NOT NULL THEN 'retail'
+                    WHEN amenity IS NOT NULL OR leisure IS NOT NULL OR tourism IS NOT NULL THEN 'misc'
+                    ELSE NULL
+                END as class
+            FROM raw_features
+        )
+        SELECT
+            osm_id,
+            osm_type,
+            name,
+            class,
+            ST_X(centroid)::DOUBLE as lon,
+            ST_Y(centroid)::DOUBLE as lat,
+            '{region_name}' as state,
+            amenity,
+            shop,
+            leisure,
+            tourism,
+            cuisine,
+            opening_hours,
+            phone,
+            website,
+            brand,
+            "operator",
+            FLOOR(ST_X(centroid))::INTEGER as lon_bucket,
+            FLOOR(ST_Y(centroid))::INTEGER as lat_bucket
+        FROM classified
+        WHERE class IS NOT NULL
+    ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+    """
 
-        for line_num, line in enumerate(f):
-            if not line.lstrip("\x1e").strip():
-                continue
+    conn.sql(query)
 
-            try:
-                feature = json.loads(line.lstrip("\x1e"))
-            except json.JSONDecodeError:
-                print(f"  Warning: Could not parse line {line_num + 1}, skipping")
-                continue
+    # Get stats
+    stats = conn.sql(f"""
+        SELECT
+            COUNT(*) as total,
+            COUNT(DISTINCT class) as classes
+        FROM read_parquet('{output_path}')
+    """).fetchone()
 
-            props = feature.get("properties", {})
-            geom = feature.get("geometry")
+    print(f"Total POIs: {stats[0]:,}")
+    print(f"Unique classes: {stats[1]}")
 
-            if not geom:
-                skipped_no_geom += 1
-                continue
+    # Show class breakdown
+    class_counts = conn.sql(f"""
+        SELECT class, COUNT(*) as cnt
+        FROM read_parquet('{output_path}')
+        GROUP BY class
+        ORDER BY cnt DESC
+        LIMIT 10
+    """).fetchall()
 
-            if not props.get("name"):
-                skipped_no_name += 1
-                continue
+    print("Top classes:")
+    for cls, cnt in class_counts:
+        print(f"  {cls}: {cnt:,}")
 
-            # Get coordinates - compute centroid for non-point geometries
-            geom_type = geom["type"]
-            if geom_type == "Point":
-                lon, lat = geom["coordinates"]
-            elif geom_type == "Polygon":
-                # Compute centroid of first ring
-                coords = geom["coordinates"][0]
-                lon = sum(c[0] for c in coords) / len(coords)
-                lat = sum(c[1] for c in coords) / len(coords)
-            elif geom_type == "LineString":
-                # Use midpoint
-                coords = geom["coordinates"]
-                mid = len(coords) // 2
-                lon, lat = coords[mid]
-            elif geom_type == "MultiPolygon":
-                # Use centroid of first polygon
-                coords = geom["coordinates"][0][0]
-                lon = sum(c[0] for c in coords) / len(coords)
-                lat = sum(c[1] for c in coords) / len(coords)
-            else:
-                continue
+    file_size = output_path.stat().st_size / 1024 / 1024
+    print(f"Wrote {output_path} ({file_size:.1f} MB)")
 
-            poi_class = classify_poi(props)
-            if not poi_class:
-                skipped_no_class += 1
-                continue
+    conn.close()
 
-            # Build record with partition columns
-            # lon_bucket and lat_bucket for efficient bbox queries
-            lon_bucket = math.floor(lon)
-            lat_bucket = math.floor(lat)
-
-            tags_to_store = {
-                k: v
-                for k, v in props.items()
-                if not k.startswith("@")
-                and k
-                not in [
-                    "name",
-                    "amenity",
-                    "shop",
-                    "leisure",
-                    "tourism",
-                    "cuisine",
-                    "opening_hours",
-                    "phone",
-                    "website",
-                    "brand",
-                    "operator",
-                ]
-            }
-
-            record = {
-                "osm_id": str(props.get("@id", "")),
-                "osm_type": props.get("@type", "node"),
-                "name": props.get("name"),
-                "class": poi_class,
-                "lon": lon,
-                "lat": lat,
-                "state": region_name,
-                "amenity": props.get("amenity"),
-                "shop": props.get("shop"),
-                "leisure": props.get("leisure"),
-                "tourism": props.get("tourism"),
-                "cuisine": props.get("cuisine"),
-                "opening_hours": props.get("opening_hours"),
-                "phone": props.get("phone"),
-                "website": props.get("website"),
-                "brand": props.get("brand"),
-                "operator": props.get("operator"),
-                "tags": json.dumps(tags_to_store) if tags_to_store else None,
-                # Partition columns
-                "lon_bucket": lon_bucket,
-                "lat_bucket": lat_bucket,
-            }
-            records.append(record)
-            total_pois += 1
-
-            if total_pois % 50000 == 0:
-                print(f"  Processed {total_pois:,} POIs...")
-
-    print(f"Total POIs: {total_pois:,}")
-    print(f"  Skipped - no geometry: {skipped_no_geom:,}")
-    print(f"  Skipped - no name: {skipped_no_name:,}")
-    print(f"  Skipped - no class: {skipped_no_class:,}")
-
-    if not records:
+    if stats[0] == 0:
         print("WARNING: No POIs found!")
         return None
 
-    # Define schema
-    schema = pa.schema(
-        [
-            ("osm_id", pa.string()),
-            ("osm_type", pa.string()),
-            ("name", pa.string()),
-            ("class", pa.string()),
-            ("lon", pa.float64()),
-            ("lat", pa.float64()),
-            ("state", pa.string()),
-            ("amenity", pa.string()),
-            ("shop", pa.string()),
-            ("leisure", pa.string()),
-            ("tourism", pa.string()),
-            ("cuisine", pa.string()),
-            ("opening_hours", pa.string()),
-            ("phone", pa.string()),
-            ("website", pa.string()),
-            ("brand", pa.string()),
-            ("operator", pa.string()),
-            ("tags", pa.string()),
-            ("lon_bucket", pa.int32()),
-            ("lat_bucket", pa.int32()),
-        ]
-    )
-
-    # Create table from records
-    table = pa.Table.from_pylist(records, schema=schema)
-
-    # Write parquet file
-    pq.write_table(table, output_path, compression="snappy")
-
-    print(f"Wrote {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
     return output_path
 
 
