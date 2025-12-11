@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use aws_sdk_s3::primitives::ByteStream;
 use clap::Parser;
 use h3o::{CellIndex, LatLng, Resolution};
 use hashbrown::HashMap;
@@ -6,16 +7,29 @@ use osmpbf::{Element, ElementReader};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// CLI parameters.
+/// CLI parameters - all can be set via environment variables.
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Shard an OSM planet file into H3 cells")]
 struct Args {
     /// Path to the .osm.pbf file to scan.
+    #[arg(env = "OSM_FILE")]
     osm_file: PathBuf,
+
     /// Highest H3 resolution to use when binning nodes (0-15).
+    #[arg(env = "MAX_RESOLUTION", default_value = "7")]
     max_resolution: u8,
+
     /// Maximum number of nodes allowed per shard before splitting.
+    #[arg(env = "MAX_NODES_PER_SHARD", default_value = "5000000")]
     max_nodes: u64,
+
+    /// S3 bucket to write the manifest to (optional - if not set, writes to stdout).
+    #[arg(long, env = "S3_BUCKET")]
+    s3_bucket: Option<String>,
+
+    /// Run ID for organizing outputs in S3.
+    #[arg(long, env = "RUN_ID")]
+    run_id: Option<String>,
 }
 
 /// Aggregated counts for every resolution plus the total number of nodes we saw.
@@ -64,7 +78,8 @@ struct Geometry {
     coordinates: Vec<Vec<[f64; 2]>>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
     if !args.osm_file.exists() {
         bail!("file does not exist: {}", args.osm_file.display());
@@ -93,8 +108,21 @@ fn main() -> Result<()> {
     let shards = build_shards(&scan.counts, max_resolution, args.max_nodes);
     eprintln!("Generated {} shards.", shards.len());
 
-    eprintln!("Writing GeoJSON to stdout...");
-    write_geojson(&shards)?;
+    // Generate GeoJSON
+    let geojson = generate_geojson(&shards)?;
+
+    // Output to S3 or stdout
+    if let (Some(bucket), Some(run_id)) = (&args.s3_bucket, &args.run_id) {
+        eprintln!("Uploading manifest to S3...");
+        upload_to_s3(&geojson, bucket, run_id).await?;
+        eprintln!(
+            "Manifest uploaded to s3://{}/runs/{}/shards/manifest.json",
+            bucket, run_id
+        );
+    } else {
+        eprintln!("Writing GeoJSON to stdout...");
+        println!("{}", geojson);
+    }
 
     Ok(())
 }
@@ -266,8 +294,8 @@ fn subdivide(
     }
 }
 
-/// Convert the shard list into a GeoJSON FeatureCollection.
-fn write_geojson(shards: &[Shard]) -> Result<()> {
+/// Convert the shard list into a GeoJSON string.
+fn generate_geojson(shards: &[Shard]) -> Result<String> {
     let mut features = Vec::with_capacity(shards.len());
 
     for shard in shards {
@@ -291,7 +319,26 @@ fn write_geojson(shards: &[Shard]) -> Result<()> {
         features,
     };
 
-    println!("{}", serde_json::to_string_pretty(&collection)?);
+    Ok(serde_json::to_string_pretty(&collection)?)
+}
+
+/// Upload the GeoJSON manifest to S3.
+async fn upload_to_s3(content: &str, bucket: &str, run_id: &str) -> Result<()> {
+    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let client = aws_sdk_s3::Client::new(&config);
+
+    let key = format!("runs/{}/shards/manifest.json", run_id);
+
+    client
+        .put_object()
+        .bucket(bucket)
+        .key(&key)
+        .body(ByteStream::from(content.as_bytes().to_vec()))
+        .content_type("application/json")
+        .send()
+        .await
+        .context("failed to upload manifest to S3")?;
+
     Ok(())
 }
 
