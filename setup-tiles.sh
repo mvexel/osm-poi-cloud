@@ -120,12 +120,23 @@ OAC_ID=$(aws cloudfront create-origin-access-control \
 
 echo "  OAC ID: ${OAC_ID}"
 
-# Create CloudFront distribution
+# Check for existing CloudFront distribution first
 echo ""
-echo "Creating CloudFront distribution..."
-DISTRIBUTION_CONFIG=$(cat <<EOF
+echo "Checking for existing CloudFront distribution..."
+DISTRIBUTION_ID=$(aws cloudfront list-distributions \
+    --query "DistributionList.Items[?Comment=='OSM POI Tiles'].Id | [0]" \
+    --output text 2>/dev/null)
+
+if [ -n "${DISTRIBUTION_ID}" ] && [ "${DISTRIBUTION_ID}" != "None" ]; then
+    echo "  Found existing distribution: ${DISTRIBUTION_ID}"
+    DISTRIBUTION_DOMAIN=$(aws cloudfront list-distributions \
+        --query "DistributionList.Items[?Comment=='OSM POI Tiles'].DomainName | [0]" \
+        --output text)
+else
+    echo "Creating new CloudFront distribution..."
+    DISTRIBUTION_CONFIG=$(cat <<EOF
 {
-    "CallerReference": "osm-h3-tiles-$(date +%s)",
+    "CallerReference": "osm-h3-tiles-${S3_BUCKET}",
     "Comment": "OSM POI Tiles",
     "Enabled": true,
     "Origins": {
@@ -164,24 +175,12 @@ DISTRIBUTION_CONFIG=$(cat <<EOF
 EOF
 )
 
-DISTRIBUTION_RESULT=$(aws cloudfront create-distribution \
-    --distribution-config "${DISTRIBUTION_CONFIG}" \
-    --output json 2>/dev/null) || {
-    echo "  Distribution may already exist"
-    DISTRIBUTION_RESULT=""
-}
+    DISTRIBUTION_RESULT=$(aws cloudfront create-distribution \
+        --distribution-config "${DISTRIBUTION_CONFIG}" \
+        --output json)
 
-if [ -n "${DISTRIBUTION_RESULT}" ]; then
     DISTRIBUTION_ID=$(echo "${DISTRIBUTION_RESULT}" | jq -r '.Distribution.Id')
     DISTRIBUTION_DOMAIN=$(echo "${DISTRIBUTION_RESULT}" | jq -r '.Distribution.DomainName')
-else
-    # Find existing distribution
-    DISTRIBUTION_ID=$(aws cloudfront list-distributions \
-        --query "DistributionList.Items[?Comment=='OSM POI Tiles'].Id | [0]" \
-        --output text)
-    DISTRIBUTION_DOMAIN=$(aws cloudfront list-distributions \
-        --query "DistributionList.Items[?Comment=='OSM POI Tiles'].DomainName | [0]" \
-        --output text)
 fi
 
 echo "  Distribution ID: ${DISTRIBUTION_ID}"

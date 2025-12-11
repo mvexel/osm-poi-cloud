@@ -113,14 +113,14 @@ def process_geojson_to_parquet(
     conn = duckdb.connect()
     conn.sql("LOAD spatial;")
 
-    # Debug: check what columns we're getting
-    sample = conn.sql(f"""
-        SELECT *
-        FROM read_json_auto('{geojson_path}', maximum_object_size=10485760)
-        LIMIT 1
-    """)
-    print(f"  Columns detected: {sample.columns}")
-    print(f"  Sample row: {sample.fetchone()}")
+    # Debug: check record count
+    count = conn.sql(f"""
+        SELECT COUNT(*) FROM read_json('{geojson_path}',
+            columns={{id: 'VARCHAR', type: 'VARCHAR', geometry: 'JSON', properties: 'JSON'}},
+            maximum_object_size=10485760
+        )
+    """).fetchone()[0]
+    print(f"  Total records in file: {count:,}")
 
     # SQL query with POI classification and centroid computation
     query = f"""
@@ -128,29 +128,32 @@ def process_geojson_to_parquet(
         WITH raw_features AS (
             SELECT
                 id as osm_id,
-                CAST(properties['@type'] AS VARCHAR) as osm_type,
-                CAST(properties['name'] AS VARCHAR) as name,
-                CAST(properties['amenity'] AS VARCHAR) as amenity,
-                CAST(properties['shop'] AS VARCHAR) as shop,
-                CAST(properties['leisure'] AS VARCHAR) as leisure,
-                CAST(properties['tourism'] AS VARCHAR) as tourism,
-                CAST(properties['office'] AS VARCHAR) as office,
-                CAST(properties['healthcare'] AS VARCHAR) as healthcare,
-                CAST(properties['railway'] AS VARCHAR) as railway,
-                CAST(properties['aeroway'] AS VARCHAR) as aeroway,
-                CAST(properties['historic'] AS VARCHAR) as historic,
-                CAST(properties['man_made'] AS VARCHAR) as man_made,
-                CAST(properties['natural'] AS VARCHAR) as "natural",
-                CAST(properties['public_transport'] AS VARCHAR) as public_transport,
-                CAST(properties['cuisine'] AS VARCHAR) as cuisine,
-                CAST(properties['opening_hours'] AS VARCHAR) as opening_hours,
-                CAST(properties['phone'] AS VARCHAR) as phone,
-                CAST(properties['website'] AS VARCHAR) as website,
-                CAST(properties['brand'] AS VARCHAR) as brand,
-                CAST(properties['operator'] AS VARCHAR) as "operator",
-                ST_Centroid(ST_GeomFromGeoJSON(to_json(geometry))) as centroid
-            FROM read_json_auto('{geojson_path}', maximum_object_size=10485760)
-            WHERE properties['name'] IS NOT NULL
+                properties->>'@type' as osm_type,
+                properties->>'name' as name,
+                properties->>'amenity' as amenity,
+                properties->>'shop' as shop,
+                properties->>'leisure' as leisure,
+                properties->>'tourism' as tourism,
+                properties->>'office' as office,
+                properties->>'healthcare' as healthcare,
+                properties->>'railway' as railway,
+                properties->>'aeroway' as aeroway,
+                properties->>'historic' as historic,
+                properties->>'man_made' as man_made,
+                properties->>'natural' as "natural",
+                properties->>'public_transport' as public_transport,
+                properties->>'cuisine' as cuisine,
+                properties->>'opening_hours' as opening_hours,
+                properties->>'phone' as phone,
+                properties->>'website' as website,
+                properties->>'brand' as brand,
+                properties->>'operator' as "operator",
+                ST_Centroid(ST_GeomFromGeoJSON(geometry)) as centroid
+            FROM read_json('{geojson_path}',
+                columns={{id: 'VARCHAR', type: 'VARCHAR', geometry: 'JSON', properties: 'JSON'}},
+                maximum_object_size=10485760
+            )
+            WHERE properties->>'name' IS NOT NULL
               AND geometry IS NOT NULL
         ),
         classified AS (
