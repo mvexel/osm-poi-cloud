@@ -1,13 +1,23 @@
 {
     "app": "npx ts-node --prefer-ts-exts bin/pipeline.ts",
+    "watch": {
+        "include": ["**"],
+        "exclude": [
+            "README.md",
+            "cdk*.json",
+            "**/*.d.ts",
+            "**/*.js",
+            "tsconfig.json",
+            "package*.json",
+            "node_modules"
+        ]
+    },
     "context": {
         "projectName": "osm-h3",
-        "jobQueueName": "osm-h3-queue",
-        "downloadJobDefinition": "osm-h3-job",
-        "sharderJobDefinition": "osm-h3-job",
-        "processJobDefinition": "osm-h3-job",
-        "postprocessJobDefinition": "osm-h3-merge-job",
-        "stateMachineName": "osm-h3-pipeline",
-        "logRetentionDays": 30
+        "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+        "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+        "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
+        "@aws-cdk/core:stackRelativeExports": true,
+        "@aws-cdk/aws-ecs:arnFormatIncludesClusterName": true
     }
 }

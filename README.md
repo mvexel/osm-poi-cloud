@@ -1,87 +1,146 @@
-# OSM POI Pipeline
+# OSM-H3 Pipeline
 
-Serverless pipeline for processing OpenStreetMap POI data for all US states/territories.
+Serverless pipeline for processing OpenStreetMap POI data using H3 spatial indexing and AWS Batch.
 
 ## Architecture
 
 ```
-AWS Batch (Spot) → Parquet/S3 → Athena → API Gateway + Lambda
+┌──────────┬──────────┬────────────┬────────────┬────────────┐
+│ Download │  Shard   │ Process ×N │   Merge    │  Tiles     │
+│ (Batch)  │  (Rust)  │   (Batch)  │  (Batch)   │  (Batch)   │
+└──────────┴──────────┴────────────┴────────────┴────────────┘
+        ▲                  ▲
+        │                  │
+        └───── Python orchestrator submits AWS Batch jobs ─────┘
 ```
 
-- **Processing**: AWS Batch with Spot instances (~$3-5 per full run)
-- **Storage**: S3 with Parquet files (~$0.02/GB/month)
-- **Query**: Athena with partition pruning for fast bbox queries
-- **API**: API Gateway + Lambda (free tier)
+- **Orchestration**: Lightweight Python script that submits AWS Batch jobs sequentially
+- **Processing**: AWS Batch with Spot instances
+- **Sharding**: Rust-based H3 spatial partitioning
+- **Storage**: S3 with Parquet + PMTiles
+- **Query**: Athena with partition pruning / CloudFront for tiles
+- **Infrastructure**: AWS CDK (TypeScript) for Batch/S3/ECR/IAM
 
 ## Quick Start
 
 ```bash
-# 1. Setup AWS infrastructure (.env is generated here)
-./setup-aws.sh
+# 1. Deploy infrastructure
+make deploy
 
-# 2. Build and push Docker image
-./build-and-push.sh
+# 2. Build and push container images
+make build-images
 
-# 3. Setup Athena + Lambda API
-./setup-athena-api.sh
+# 3. Run the pipeline (AWS Batch download → shard → process → merge → tiles)
+make run [RUN_ID=custom-id]
 
-# 4. Run batch jobs for all states
-./run-all-states.sh
-
-# 5. (Optional) Setup CloudFront + tiles job definition
-./setup-tiles.sh
-
-# 6. Query the API / generate PMTiles
-source .env
-curl "${API_ENDPOINT}/pois?bbox=-122.5,37.7,-122.3,37.9"
-# Submit PMTiles Batch job after parquet files are ready
-./generate-tiles.sh
+# 4. Check status
+make status
 ```
 
-### Frontend map viewer (optional)
+## Pipeline Stages
+
+| Stage | Description | Duration |
+|-------|-------------|----------|
+| **Download** | Fetch planet.osm.pbf (~70GB) | ~2 hours |
+| **Shard** | Rust H3 partitioner creates spatial shards | ~4 hours |
+| **Process** | Fan-out to many AWS Batch jobs (one per H3 shard) | ~2 hours |
+| **Merge** | Combine shard outputs to final Parquet | ~30 min |
+| **Tiles** | Generate PMTiles with tippecanoe | ~1 hour |
+
+## Batch Pipeline Runner
+
+The `make run` target wraps `scripts/run_pipeline.py`, a small Python program that
+submits AWS Batch jobs for each stage. Key options:
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env   # set VITE_API_BASE to your API Gateway URL (optional if streaming PMTiles only)
-nano .env              # set VITE_PMTILES_URL=https://<cloudfront>/pois.pmtiles to stream tiles client-side
-npm run dev             # opens http://localhost:5173
+# Default (download full planet, generate tiles)
+make run
+
+# Custom run ID + resume from a specific stage
+make run RUN_ID=planet-20250101-010101 START_AT=process
+
+# US-only pipeline (Geofabrik extract)
+make run-us                  # alias for make run PLANET_URL=...
+
+# Pass any script flag directly
+python scripts/run_pipeline.py --help
 ```
 
-When `VITE_PMTILES_URL` is configured, the frontend streams points directly from the PMTiles archive and
-skips live API calls (counts come from the API so they stay hidden, but the class dropdown still filters locally).
-Clear `VITE_PMTILES_URL` to return to API-driven mode.
-
-## Documentation
-
-See [WORKFLOW.md](WORKFLOW.md) for detailed documentation including:
-- Step-by-step setup instructions
-- API endpoints and query parameters
-- POI categories
-- Cost breakdown
-- Troubleshooting
-
-Planning the Infrastructure-as-Code migration? See [docs/iac-plan.md](docs/iac-plan.md).
+The runner automatically infers the S3 bucket (`osm-h3-data-<account>`) and job
+queue (`osm-h3-queue`) created by CDK. It will block until each stage finishes
+and prints progress as process jobs complete.
 
 ## Project Structure
 
 ```
 osm-h3/
-├── batch/                    # Batch processing container
+├── infra/cdk/              # AWS CDK infrastructure
+│   ├── lib/
+│   │   └── infrastructure-stack.ts   # S3, ECR, Batch, IAM
+│   └── bin/pipeline.ts
+├── batch/                  # Processing container
 │   ├── Dockerfile
-│   ├── process_region.py
-│   └── requirements.txt
-├── athena/                   # Athena + Lambda API
+│   ├── processor.py        # Unified download/process/merge stages
+│   └── process_region.py   # Legacy per-region processor
+├── sharding/               # Rust H3 sharder
+│   ├── Cargo.toml
+│   ├── Dockerfile
+│   └── src/main.rs
+├── tiles/                  # PMTiles generator
+│   ├── Dockerfile
+│   └── generate_pmtiles.py
+├── athena/                 # Query layer
 │   ├── create_table.sql
 │   └── lambda_handler.py
-├── scripts/
-│   └── common.sh             # Shared helpers (env loading, AWS/Docker guards)
-├── setup-aws.sh              # AWS Batch infrastructure
-├── setup-athena-api.sh       # Athena + API Gateway setup
-├── setup-tiles.sh            # Tiles ECR/Batch + CloudFront
-├── generate-tiles.sh         # Submit PMTiles Batch job
-├── build-and-push.sh         # Build container image
-├── run-all-states.sh         # Submit batch jobs
-├── monitor.sh                # Monitor job progress
-└── WORKFLOW.md               # Full documentation
+├── frontend/               # React map viewer
+└── Makefile               # Build/deploy commands
 ```
+
+## Commands
+
+```bash
+make help              # Show all commands
+
+# Infrastructure
+make deploy            # Deploy CDK stacks
+make synth             # Preview CloudFormation
+make destroy           # Tear down stacks
+
+# Container Images
+make build-images      # Build and push all images
+make build-processor   # Build processor image only
+make build-sharder     # Build sharder image only
+make build-tiles       # Build tiles image only
+
+# Pipeline
+make run               # Run download → shard → process → merge → tiles
+make run-us            # Run pipeline on Geofabrik US extract
+make status            # List running AWS Batch jobs
+
+# Development
+make check             # Type-check CDK and Rust
+make clean             # Remove build artifacts
+```
+
+## Frontend Map Viewer
+
+```bash
+cd frontend
+npm install
+cp .env.example .env
+# Set VITE_PMTILES_URL=https://<cloudfront>/tiles/pois.pmtiles
+npm run dev
+```
+
+## Documentation
+
+- [Infrastructure Guide](infra/README.md) - CDK deployment, configuration, S3 layout
+- [Workflow Details](WORKFLOW.md) - API endpoints, POI categories, cost breakdown
+
+## Cost Estimate
+
+| Resource | Monthly Cost |
+|----------|-------------|
+| Batch (Spot) | ~$5-10 per full run |
+| S3 Storage | ~$0.02/GB |
+| **Total** | ~$10-20/month for weekly runs |

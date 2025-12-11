@@ -1,55 +1,154 @@
-# Infra/CDK
+# OSM-H3 Infrastructure
 
-This folder holds the CDK app for the Batch + Step Functions pipeline. It is intentionally minimal so you can grow it as you add more AWS pieces.
+AWS CDK infrastructure for the OSM-H3 processing pipeline. The stack provisions
+the S3 bucket, ECR repos, Batch compute environment, job queue, and job
+definitions that the Python runner submits jobs to.
 
-## Layout
-- `cdk/` – CDK app (TypeScript) that defines the Step Functions state machine and any supporting IAM/Log resources.
-- Existing runtime code stays where it is (`sharding/`, `batch/`, `tiles/`); only orchestration moves here.
+## Architecture
+
+```
+┌─────────┬──────────┬────────────┬──────────┬────────────┐
+│Download │  Shard   │ Process ×N │  Merge   │   Tiles    │
+└─────────┴──────────┴────────────┴──────────┴────────────┘
+           ▲                          ▲
+           └──── AWS Batch jobs submitted by scripts/run_pipeline.py ────┘
+```
+
+## Stacks
+
+### OsmH3InfraStack
+
+Core infrastructure resources:
+
+- **S3 Bucket** - Data storage with intelligent tiering (90/180 day archive)
+- **ECR Repositories** - Container images for processor, sharder, tiles
+- **VPC** - Uses default VPC with public subnets
+- **Batch Compute Environment** - Spot instances (m6i, m5, r6i, r5)
+- **Job Queue** - Single queue for all job types
+- **Job Definitions** - Download, Sharder, Processor, Merge, Tiles
+- **IAM Roles** - Least-privilege roles for ECS tasks
 
 ## Prerequisites
-- Node.js 18+
-- AWS credentials with permission to deploy IAM, Step Functions, Batch, and CloudWatch Logs
-- (One-time) CDK bootstrap in the target account/region: `cdk bootstrap aws://<ACCOUNT>/<REGION>`
 
-## Quick start
-```sh
+1. Node.js 18+
+2. AWS CLI configured with appropriate credentials
+3. CDK bootstrapped in target account/region:
+   ```bash
+   cd infra/cdk
+   npx cdk bootstrap aws://ACCOUNT/REGION
+   ```
+
+## Deployment
+
+```bash
 cd infra/cdk
 npm install
-npm run synth   # generates CloudFormation
-npm run deploy  # deploys the stack
+
+# Synthesize CloudFormation (preview)
+npm run synth
+
+# Deploy infrastructure
+npm run deploy
+
+# (Optional) Change defaults via context (projectName)
+npx cdk deploy --all -c projectName=my-prefix
 ```
 
-## Configuring values
-The stack reads context values from `cdk.json` (edit before deploy) or via `-c key=value` on the CLI. Defaults are tailored to the existing shell scripts.
+## Configuration
 
-| Context key | Default | Meaning |
-|-------------|---------|---------|
-| `projectName` | `osm-h3` | Prefix for names/log groups |
-| `jobQueueName` | `osm-h3-queue` | Batch job queue name |
-| `downloadJobDefinition` | `osm-h3-job` | Job definition that downloads the planet file |
-| `sharderJobDefinition` | `osm-h3-job` | Job definition that runs the Rust sharder |
-| `processJobDefinition` | `osm-h3-job` | Job definition that processes the whole planet after sharding |
-| `postprocessJobDefinition` | `osm-h3-merge-job` | Optional merge/postprocess job |
-| `stateMachineName` | `osm-h3-pipeline` | Name of the Step Functions state machine |
-| `logRetentionDays` | `30` | CloudWatch Logs retention for the state machine |
+Context parameters in `cdk.json`:
 
-If your job definitions live in a different account/region or have different names, override them with CLI context: `npm run deploy -- -c regionJobDefinition=my-job-def`.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `projectName` | `osm-h3` | Resource name prefix |
 
-## Expected state machine input
-```json
-{
-  "runId": "weekly-2025-12-11",
-  "shardPrefix": "s3://osm-h3-data/weekly-2025-12-11/shards/"
-}
+Override via CLI:
+```bash
+npx cdk deploy --all -c projectName=my-prefix
 ```
-- `runId` is forwarded to every Batch job as `RUN_ID`.
-- `shardPrefix` is forwarded as `SHARD_PREFIX` so jobs know where to read/write shards.
 
-## What gets deployed
-- CloudWatch log group for the state machine
-- IAM role for Step Functions with permissions to submit/describe/terminate Batch jobs and write logs
-- State machine: Download → Shard → Process (whole planet) → optional PostProcess → Success/Fail, with retries on transient errors
+## Running the Pipeline
 
-## Next steps
-- Wire an EventBridge schedule to kick off weekly runs with your preferred `runId` and shard prefix.
-- Add SNS/Slack notifications if you want alerts on failure (the stack is ready for an SNS topic ARN to be added later).
+Once the infrastructure stack is deployed and container images are pushed to ECR,
+run the Batch pipeline with:
+
+```bash
+make run                      # download → shard → process → merge → tiles
+make run START_AT=process     # resume a previous run
+make run PLANET_URL=...       # override the download source
+```
+
+The command wraps `scripts/run_pipeline.py`, which loads credentials from the
+standard AWS CLI configuration and blocks until each stage completes. All Batch
+jobs are visible in the AWS console (Job queue: `<projectName>-queue`).
+
+## Building Container Images
+
+After deployment, build and push container images:
+
+```bash
+# Get ECR URIs from CDK outputs
+PROCESSOR_URI=$(aws cloudformation describe-stacks \
+    --stack-name OsmH3InfraStack \
+    --query "Stacks[0].Outputs[?OutputKey=='ProcessorRepoUri'].OutputValue" \
+    --output text)
+
+SHARDER_URI=$(aws cloudformation describe-stacks \
+    --stack-name OsmH3InfraStack \
+    --query "Stacks[0].Outputs[?OutputKey=='SharderRepoUri'].OutputValue" \
+    --output text)
+
+TILES_URI=$(aws cloudformation describe-stacks \
+    --stack-name OsmH3InfraStack \
+    --query "Stacks[0].Outputs[?OutputKey=='TilesRepoUri'].OutputValue" \
+    --output text)
+
+# Login to ECR
+aws ecr get-login-password | docker login --username AWS --password-stdin "${PROCESSOR_URI%%/*}"
+
+# Build and push processor
+docker buildx build --platform linux/amd64 -t "$PROCESSOR_URI:latest" ../batch --push
+
+# Build and push sharder
+docker buildx build --platform linux/amd64 -t "$SHARDER_URI:latest" ../sharding --push
+
+# Build and push tiles
+docker buildx build --platform linux/amd64 -t "$TILES_URI:latest" ../tiles --push
+```
+
+## S3 Data Layout
+
+```
+s3://osm-h3-data-{account}/
+├── runs/
+│   └── {runId}/
+│       ├── planet.osm.pbf           # Downloaded planet file
+│       ├── shards/
+│       │   ├── manifest.json        # Shard definitions (GeoJSON)
+│       │   ├── {h3_index}/
+│       │   │   └── data.parquet     # Per-shard output
+│       │   └── ...
+│       └── output/
+│           └── pois.parquet         # Merged final output
+├── parquet/
+│   └── pois.parquet                 # Latest merged output (for tiles)
+└── tiles/
+    └── pois.pmtiles                 # Generated vector tiles
+```
+
+## Cost Optimization
+
+- **Spot Instances** - Compute environment uses spot with 80% bid
+- **Intelligent Tiering** - S3 objects auto-archive after 90/180 days
+- **Run Lifecycle** - Old runs expire after 30 days
+- **Right-sizing** - Job definitions tuned for each workload
+
+## Cleanup
+
+```bash
+# Destroy all stacks (keeps S3 bucket)
+npx cdk destroy --all
+
+# To also delete S3 bucket, first empty it:
+aws s3 rm s3://osm-h3-data-{account} --recursive
+```
