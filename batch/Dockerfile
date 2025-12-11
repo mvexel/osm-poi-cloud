@@ -1,5 +1,5 @@
-# OSM POI Batch Processor
-# Processes OSM extracts to Parquet with DuckDB spatial
+# OSM-H3 Batch Processor
+# Multi-stage processor for download, shard processing, and merge
 
 FROM ghcr.io/osgeo/gdal:ubuntu-small-3.8.0
 
@@ -7,6 +7,7 @@ FROM ghcr.io/osgeo/gdal:ubuntu-small-3.8.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     osmium-tool \
     curl \
+    aria2 \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -14,14 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
-# Pre-install DuckDB spatial extension (avoids network call at runtime)
-RUN python3 -c "import duckdb; duckdb.sql('INSTALL spatial')"
+# Pre-install DuckDB extensions (avoids network calls at runtime)
+RUN python3 -c "import duckdb; conn = duckdb.connect(); conn.sql('INSTALL spatial'); conn.sql('INSTALL h3 FROM community')"
 
-# Copy processing script
+# Copy processing scripts
+COPY processor.py /app/processor.py
 COPY process_region.py /app/process_region.py
-RUN chmod +x /app/process_region.py
+RUN chmod +x /app/processor.py /app/process_region.py
 
 WORKDIR /app
 
-# Default entrypoint
-ENTRYPOINT ["python3", "/app/process_region.py"]
+# Default entrypoint - uses STAGE env var to determine behavior
+ENTRYPOINT ["python3", "/app/processor.py"]
