@@ -1,0 +1,13 @@
+{
+    "app": "npx ts-node --prefer-ts-exts bin/pipeline.ts",
+    "context": {
+        "projectName": "osm-h3",
+        "jobQueueName": "osm-h3-queue",
+        "downloadJobDefinition": "osm-h3-job",
+        "sharderJobDefinition": "osm-h3-job",
+        "processJobDefinition": "osm-h3-job",
+        "postprocessJobDefinition": "osm-h3-merge-job",
+        "stateMachineName": "osm-h3-pipeline",
+        "logRetentionDays": 30
+    }
+}
