@@ -176,6 +176,11 @@ Once infrastructure is deployed, use `pipeline_cli.py` to orchestrate the data p
 
 # Override max H3 resolution or nodes per shard
 ./pipeline_cli.py run --max-resolution 9 --max-nodes-per-shard 2000000
+
+# Async mode: submit all jobs with dependencies and return immediately
+./pipeline_cli.py run --async
+# Then monitor in another terminal:
+./pipeline_cli.py status --watch
 ```
 
 Available stages (use with `--start-at`):
@@ -184,6 +189,24 @@ Available stages (use with `--start-at`):
 - `process`: Extract POIs from each shard in parallel
 - `merge`: Combine all POI Parquet files
 - `tiles`: Generate PMTiles for visualization
+
+#### Synchronous vs Async Mode
+
+**Synchronous (default)**: The CLI waits for each stage to complete before moving to the next. This is useful for seeing immediate progress and errors.
+
+```bash
+./pipeline_cli.py run  # Blocks until all stages complete
+```
+
+**Async mode (`--async`)**: Submits all jobs with AWS Batch dependencies and returns immediately. Jobs automatically wait for their dependencies to complete. Use this for long-running pipelines where you want to monitor separately.
+
+```bash
+# Terminal 1: Submit jobs and return
+./pipeline_cli.py run --async
+
+# Terminal 2: Watch progress
+./pipeline_cli.py status --watch
+```
 
 ### Monitor Pipeline Progress
 

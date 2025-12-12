@@ -22,13 +22,23 @@ if [ -z "${RUN_ID:-}" ] || [ -z "${S3_BUCKET:-}" ]; then
     exit 1
 fi
 
-# Download planet file from S3
+# Download planet file from S3 (prefer authenticated AWS CLI).
 PLANET_KEY="runs/${RUN_ID}/planet.osm.pbf"
 PLANET_PATH="/data/planet.osm.pbf"
 
 echo "Downloading s3://${S3_BUCKET}/${PLANET_KEY}..."
-curl -s "https://${S3_BUCKET}.s3.amazonaws.com/${PLANET_KEY}" -o "${PLANET_PATH}" || \
-    aws s3 cp "s3://${S3_BUCKET}/${PLANET_KEY}" "${PLANET_PATH}"
+if ! aws s3 cp "s3://${S3_BUCKET}/${PLANET_KEY}" "${PLANET_PATH}"; then
+    echo "aws s3 cp failed, falling back to HTTPS..."
+    # -f makes curl exit nonzero on 4xx/5xx so we don't accept AccessDenied XML.
+    curl -sS -L -f "https://${S3_BUCKET}.s3.amazonaws.com/${PLANET_KEY}" -o "${PLANET_PATH}"
+fi
+
+SIZE_BYTES=$(stat -c%s "${PLANET_PATH}" 2>/dev/null || stat -f%z "${PLANET_PATH}")
+if [ "${SIZE_BYTES}" -lt 10485760 ]; then
+    echo "ERROR: Downloaded file is too small (${SIZE_BYTES} bytes)."
+    echo "Likely missing permissions or incomplete upload."
+    exit 1
+fi
 
 echo "Downloaded $(du -h ${PLANET_PATH} | cut -f1)"
 

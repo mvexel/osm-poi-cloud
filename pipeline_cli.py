@@ -44,6 +44,7 @@ def _build_runner(
     max_resolution: int | None,
     max_nodes_per_shard: int | None,
     tiles_output: str,
+    async_mode: bool = False,
 ) -> BatchPipelineRunner:
     resolved_region = _resolve_region(region)
     resolved_run_id = run_id or f"planet-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
@@ -57,6 +58,7 @@ def _build_runner(
         max_resolution=max_resolution,
         max_nodes_per_shard=max_nodes_per_shard,
         tiles_output=tiles_output,
+        async_mode=async_mode,
     )
 
 
@@ -99,6 +101,14 @@ def cli() -> None:
     show_default=True,
     help="Stage to start from.",
 )
+@click.option(
+    "--async",
+    "async_mode",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Submit all jobs with dependencies and return immediately.",
+)
 def run_pipeline(
     *,
     region: str | None,
@@ -111,6 +121,7 @@ def run_pipeline(
     max_nodes_per_shard: int | None,
     tiles_output: str,
     start_at: str,
+    async_mode: bool,
 ) -> None:
     """Run the five Batch stages in order."""
     runner = _build_runner(
@@ -123,6 +134,7 @@ def run_pipeline(
         max_resolution=max_resolution,
         max_nodes_per_shard=max_nodes_per_shard,
         tiles_output=tiles_output,
+        async_mode=async_mode,
     )
     click.echo(f"Using bucket: {runner.bucket}")
     click.echo(f"Using job queue: {runner.job_queue}")

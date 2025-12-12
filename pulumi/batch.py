@@ -83,10 +83,14 @@ def create_job_definition(
     if environment_vars:
         env_list = [{"name": k, "value": v} for k, v in environment_vars.items()]
 
-    container_properties = image_uri.apply(
-        lambda uri: json.dumps(
+    container_properties = pulumi.Output.all(
+        image_uri, execution_role_arn, job_role_arn
+    ).apply(
+        lambda args: json.dumps(
             {
-                "image": uri,
+                "image": args[0],
+                "executionRoleArn": args[1],
+                "jobRoleArn": args[2],
                 "resourceRequirements": [
                     {"type": "VCPU", "value": str(vcpus)},
                     {"type": "MEMORY", "value": str(memory)},
