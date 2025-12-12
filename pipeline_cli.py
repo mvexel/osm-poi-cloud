@@ -23,9 +23,13 @@ from scripts.run_pipeline import BatchPipelineRunner, STAGES
 
 
 def _resolve_region(explicit: str | None) -> str:
-    region = explicit or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    region = (
+        explicit or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    )
     if not region:
-        raise click.UsageError("AWS region not configured. Pass --region or export AWS_REGION.")
+        raise click.UsageError(
+            "AWS region not configured. Pass --region or export AWS_REGION."
+        )
     return region
 
 
@@ -42,7 +46,7 @@ def _build_runner(
     tiles_output: str,
 ) -> BatchPipelineRunner:
     resolved_region = _resolve_region(region)
-    resolved_run_id = run_id or f"planet-{datetime.utcnow():%Y%m%d-%H%M%S}"
+    resolved_run_id = run_id or f"planet-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
     return BatchPipelineRunner(
         region=resolved_region,
         project_name=project_name,
@@ -62,16 +66,39 @@ def cli() -> None:
 
 
 @cli.command("run", help="Run download → shard → process → merge → tiles sequentially.")
-@click.option("--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION).")
-@click.option("--project-name", default="osm-h3", show_default=True, help="Resource prefix.")
-@click.option("--run-id", help="Custom run identifier (defaults to planet-<timestamp>).")
+@click.option(
+    "--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION)."
+)
+@click.option(
+    "--project-name", default="osm-h3", show_default=True, help="Resource prefix."
+)
+@click.option(
+    "--run-id", help="Custom run identifier (defaults to planet-<timestamp>)."
+)
 @click.option("--bucket", help="Override S3 bucket name.")
 @click.option("--job-queue", help="Override AWS Batch job queue name.")
 @click.option("--planet-url", help="Custom planet/region PBF URL to download.")
-@click.option("--max-resolution", type=int, help="Override MAX_RESOLUTION env for sharder.")
-@click.option("--max-nodes-per-shard", type=int, help="Override MAX_NODES_PER_SHARD env for sharder.")
-@click.option("--tiles-output", default="pois.pmtiles", show_default=True, help="PMTiles filename.")
-@click.option("--start-at", type=click.Choice(STAGES), default="download", show_default=True, help="Stage to start from.")
+@click.option(
+    "--max-resolution", type=int, help="Override MAX_RESOLUTION env for sharder."
+)
+@click.option(
+    "--max-nodes-per-shard",
+    type=int,
+    help="Override MAX_NODES_PER_SHARD env for sharder.",
+)
+@click.option(
+    "--tiles-output",
+    default="pois.pmtiles",
+    show_default=True,
+    help="PMTiles filename.",
+)
+@click.option(
+    "--start-at",
+    type=click.Choice(STAGES),
+    default="download",
+    show_default=True,
+    help="Stage to start from.",
+)
 def run_pipeline(
     *,
     region: str | None,
@@ -104,12 +131,26 @@ def run_pipeline(
 
 
 @cli.command("status", help="Show AWS Batch queue/job status (optionally watch).")
-@click.option("--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION).")
-@click.option("--project-name", default="osm-h3", show_default=True, help="Resource prefix.")
+@click.option(
+    "--region", help="AWS region (defaults to AWS_REGION/AWS_DEFAULT_REGION)."
+)
+@click.option(
+    "--project-name", default="osm-h3", show_default=True, help="Resource prefix."
+)
 @click.option("--job-queue", help="Override AWS Batch job queue name.")
 @click.option("--bucket", help="S3 bucket to count parquet outputs from.")
-@click.option("--watch/--no-watch", default=False, show_default=True, help="Continuously refresh status.")
-@click.option("--interval", default=30, show_default=True, help="Seconds between refreshes when --watch is used.")
+@click.option(
+    "--watch/--no-watch",
+    default=False,
+    show_default=True,
+    help="Continuously refresh status.",
+)
+@click.option(
+    "--interval",
+    default=30,
+    show_default=True,
+    help="Seconds between refreshes when --watch is used.",
+)
 def show_status(
     *,
     region: str | None,
@@ -141,7 +182,9 @@ def show_status(
         try:
             while True:
                 click.clear()
-                click.echo(f"OSM-H3 Batch Status — {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC")
+                click.echo(
+                    f"OSM-H3 Batch Status — {datetime.utcnow():%Y-%m-%d %H:%M:%S} UTC"
+                )
                 click.echo("=" * 72)
                 render_once()
                 click.echo("")
@@ -155,21 +198,37 @@ def show_status(
 
 def render_queue_summary(batch_client: BaseClient, queue_name: str) -> None:
     """Print a single-line summary per AWS Batch status."""
-    statuses: Iterable[str] = ("SUBMITTED", "PENDING", "RUNNABLE", "STARTING", "RUNNING", "SUCCEEDED", "FAILED")
+    statuses: Iterable[str] = (
+        "SUBMITTED",
+        "PENDING",
+        "RUNNABLE",
+        "STARTING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+    )
     click.echo("Job counts:")
     for status in statuses:
         try:
-            resp = batch_client.list_jobs(jobQueue=queue_name, jobStatus=status, maxResults=100)
+            resp = batch_client.list_jobs(
+                jobQueue=queue_name, jobStatus=status, maxResults=100
+            )
             count = len(resp.get("jobSummaryList", []))
         except (BotoCoreError, ClientError) as exc:
-            raise click.ClickException(f"Unable to list jobs for {status}: {exc}") from exc
+            raise click.ClickException(
+                f"Unable to list jobs for {status}: {exc}"
+            ) from exc
         click.echo(f"  {status:<10} {count}")
 
 
-def render_running_jobs(batch_client: BaseClient, queue_name: str, limit: int = 5) -> None:
+def render_running_jobs(
+    batch_client: BaseClient, queue_name: str, limit: int = 5
+) -> None:
     """Show a small table of currently running jobs."""
     try:
-        resp = batch_client.list_jobs(jobQueue=queue_name, jobStatus="RUNNING", maxResults=limit)
+        resp = batch_client.list_jobs(
+            jobQueue=queue_name, jobStatus="RUNNING", maxResults=limit
+        )
     except (BotoCoreError, ClientError) as exc:
         raise click.ClickException(f"Unable to list running jobs: {exc}") from exc
 
@@ -194,7 +253,9 @@ def render_parquet_stats(s3_client: BaseClient, bucket: str) -> None:
             total += page.get("KeyCount", 0)
         click.echo(f"Parquet objects under s3://{bucket}/{prefix}: {total}")
     except (BotoCoreError, ClientError) as exc:
-        raise click.ClickException(f"Unable to list s3://{bucket}/{prefix}: {exc}") from exc
+        raise click.ClickException(
+            f"Unable to list s3://{bucket}/{prefix}: {exc}"
+        ) from exc
 
 
 def _fmt_timestamp(epoch_ms: int | None) -> str:

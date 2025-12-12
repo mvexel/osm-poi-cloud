@@ -3,10 +3,22 @@
 import os
 import pulumi
 
-from config import name, account_id, region, project_name, environment, planet_url, enable_cloudfront
+from config import (
+    name,
+    account_id,
+    region,
+    project_name,
+    environment,
+    planet_url,
+    enable_cloudfront,
+)
 
 # Import infrastructure modules
-from s3 import create_data_bucket, create_pulumi_state_bucket, create_bucket_policy_for_cloudfront
+from s3 import (
+    create_data_bucket,
+    create_pulumi_state_bucket,
+    create_bucket_policy_for_cloudfront,
+)
 from ecr import create_ecr_repositories
 from iam import (
     create_batch_execution_role,
@@ -31,8 +43,10 @@ from cloudfront import (
 )
 from images import create_all_images
 
-# Get project root (parent of pulumi directory)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Get project root
+PROJECT_ROOT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stack"
+)
 
 # =============================================================================
 # S3 Buckets
@@ -146,29 +160,31 @@ pulumi.export("data_bucket_arn", data_bucket.arn)
 # pulumi.export("pulumi_state_bucket_name", pulumi_state_bucket.bucket)
 
 # ECR
-pulumi.export("ecr_repository_urls", {
-    k: v.repository_url for k, v in ecr_repositories.items()
-})
+pulumi.export(
+    "ecr_repository_urls", {k: v.repository_url for k, v in ecr_repositories.items()}
+)
 
 # Batch
 pulumi.export("job_queue_name", job_queue.name)
 pulumi.export("job_queue_arn", job_queue.arn)
 pulumi.export("compute_environment_arn", compute_environment.arn)
-pulumi.export("job_definition_arns", {
-    k: v.arn for k, v in job_definitions.items()
-})
+pulumi.export("job_definition_arns", {k: v.arn for k, v in job_definitions.items()})
 
 # CloudFront (if enabled)
 if enable_cloudfront:
     pulumi.export("cloudfront_distribution_id", distribution.id)
     pulumi.export("cloudfront_domain", distribution.domain_name)
-    pulumi.export("tiles_url", distribution.domain_name.apply(
-        lambda domain: f"https://{domain}/pois.pmtiles"
-    ))
+    pulumi.export(
+        "tiles_url",
+        distribution.domain_name.apply(lambda domain: f"https://{domain}/pois.pmtiles"),
+    )
 else:
-    pulumi.export("tiles_url", data_bucket.bucket.apply(
-        lambda b: f"https://{b}.s3.{region}.amazonaws.com/pois.pmtiles"
-    ))
+    pulumi.export(
+        "tiles_url",
+        data_bucket.bucket.apply(
+            lambda b: f"https://{b}.s3.{region}.amazonaws.com/pois.pmtiles"
+        ),
+    )
 
 # Image URIs
 pulumi.export("image_uris", image_uris)

@@ -3,7 +3,7 @@
 import pulumi
 import pulumi_aws as aws
 
-from config import name, default_tags, region
+from config import name, default_tags
 
 
 def create_origin_access_control() -> aws.cloudfront.OriginAccessControl:
@@ -59,7 +59,12 @@ def create_origin_request_policy() -> aws.cloudfront.OriginRequestPolicy:
         headers_config=aws.cloudfront.OriginRequestPolicyHeadersConfigArgs(
             header_behavior="whitelist",
             headers=aws.cloudfront.OriginRequestPolicyHeadersConfigHeadersArgs(
-                items=["Range", "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"],
+                items=[
+                    "Range",
+                    "Origin",
+                    "Access-Control-Request-Method",
+                    "Access-Control-Request-Headers",
+                ],
             ),
         ),
         query_strings_config=aws.cloudfront.OriginRequestPolicyQueryStringsConfigArgs(

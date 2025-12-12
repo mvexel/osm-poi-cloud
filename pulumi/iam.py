@@ -9,18 +9,18 @@ from config import name, default_tags, region, account_id
 
 def create_batch_execution_role() -> aws.iam.Role:
     """Create the ECS task execution role for Batch jobs."""
-    assume_role_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "ecs-tasks.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    })
+    assume_role_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
 
     role = aws.iam.Role(
         name("batch-execution-role"),
@@ -41,18 +41,18 @@ def create_batch_execution_role() -> aws.iam.Role:
 
 def create_batch_job_role(data_bucket_arn: pulumi.Output[str]) -> aws.iam.Role:
     """Create the IAM role for Batch job containers."""
-    assume_role_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "ecs-tasks.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    })
+    assume_role_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "ecs-tasks.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
 
     role = aws.iam.Role(
         name("batch-job-role"),
@@ -62,24 +62,28 @@ def create_batch_job_role(data_bucket_arn: pulumi.Output[str]) -> aws.iam.Role:
     )
 
     # S3 access policy for the data bucket
-    s3_policy = data_bucket_arn.apply(lambda arn: json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
+    s3_policy = data_bucket_arn.apply(
+        lambda arn: json.dumps(
             {
-                "Effect": "Allow",
-                "Action": [
-                    "s3:GetObject",
-                    "s3:PutObject",
-                    "s3:DeleteObject",
-                    "s3:ListBucket",
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "s3:GetObject",
+                            "s3:PutObject",
+                            "s3:DeleteObject",
+                            "s3:ListBucket",
+                        ],
+                        "Resource": [
+                            arn,
+                            f"{arn}/*",
+                        ],
+                    }
                 ],
-                "Resource": [
-                    arn,
-                    f"{arn}/*",
-                ]
             }
-        ]
-    }))
+        )
+    )
 
     aws.iam.RolePolicy(
         name("batch-job-role-s3-policy"),
@@ -88,20 +92,22 @@ def create_batch_job_role(data_bucket_arn: pulumi.Output[str]) -> aws.iam.Role:
     )
 
     # CloudWatch Logs policy
-    logs_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Action": [
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                "Resource": f"arn:aws:logs:{region}:{account_id}:log-group:/aws/batch/*"
-            }
-        ]
-    })
+    logs_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:CreateLogGroup",
+                        "logs:CreateLogStream",
+                        "logs:PutLogEvents",
+                    ],
+                    "Resource": f"arn:aws:logs:{region}:{account_id}:log-group:/aws/batch/*",
+                }
+            ],
+        }
+    )
 
     aws.iam.RolePolicy(
         name("batch-job-role-logs-policy"),
@@ -114,18 +120,18 @@ def create_batch_job_role(data_bucket_arn: pulumi.Output[str]) -> aws.iam.Role:
 
 def create_batch_service_role() -> aws.iam.Role:
     """Create the service role for AWS Batch."""
-    assume_role_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "batch.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    })
+    assume_role_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "batch.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
 
     role = aws.iam.Role(
         name("batch-service-role"),
@@ -146,18 +152,18 @@ def create_batch_service_role() -> aws.iam.Role:
 
 def create_spot_fleet_role() -> aws.iam.Role:
     """Create the IAM role for EC2 Spot Fleet."""
-    assume_role_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "spotfleet.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    })
+    assume_role_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "spotfleet.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
 
     role = aws.iam.Role(
         name("spot-fleet-role"),
@@ -177,18 +183,18 @@ def create_spot_fleet_role() -> aws.iam.Role:
 
 def create_batch_instance_role() -> aws.iam.InstanceProfile:
     """Create the instance profile for Batch EC2 instances."""
-    assume_role_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "ec2.amazonaws.com"
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    })
+    assume_role_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "ec2.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
 
     role = aws.iam.Role(
         name("batch-instance-role"),

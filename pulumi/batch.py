@@ -83,22 +83,26 @@ def create_job_definition(
     if environment_vars:
         env_list = [{"name": k, "value": v} for k, v in environment_vars.items()]
 
-    container_properties = image_uri.apply(lambda uri: json.dumps({
-        "image": uri,
-        "resourceRequirements": [
-            {"type": "VCPU", "value": str(vcpus)},
-            {"type": "MEMORY", "value": str(memory)},
-        ],
-        "environment": env_list,
-        "logConfiguration": {
-            "logDriver": "awslogs",
-            "options": {
-                "awslogs-group": f"/aws/batch/osm-h3-{job_name}",
-                "awslogs-region": region,
-                "awslogs-stream-prefix": job_name,
-            },
-        },
-    }))
+    container_properties = image_uri.apply(
+        lambda uri: json.dumps(
+            {
+                "image": uri,
+                "resourceRequirements": [
+                    {"type": "VCPU", "value": str(vcpus)},
+                    {"type": "MEMORY", "value": str(memory)},
+                ],
+                "environment": env_list,
+                "logConfiguration": {
+                    "logDriver": "awslogs",
+                    "options": {
+                        "awslogs-group": f"/aws/batch/osm-h3-{job_name}",
+                        "awslogs-region": region,
+                        "awslogs-stream-prefix": job_name,
+                    },
+                },
+            }
+        )
+    )
 
     job_def = aws.batch.JobDefinition(
         name(f"job-{job_name}"),
