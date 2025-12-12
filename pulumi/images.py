@@ -4,7 +4,7 @@ import pulumi
 import pulumi_aws as aws
 import pulumi_docker as docker
 
-from config import name, region, account_id
+from config import name
 
 
 def get_ecr_auth_token() -> docker.RegistryArgs:
@@ -63,17 +63,17 @@ def create_all_images(
         # The batch processor handles download, process, and merge stages
         # based on STAGE environment variable
         "processor": {
-            "context": f"{project_root}/_deprecated/batch",
-            "dockerfile": f"{project_root}/_deprecated/batch/Dockerfile",
+            "context": f"{project_root}/batch",
+            "dockerfile": f"{project_root}/batch/Dockerfile",
         },
         # Download and merge use the same image as processor with different STAGE
         "downloader": {
-            "context": f"{project_root}/_deprecated/batch",
-            "dockerfile": f"{project_root}/_deprecated/batch/Dockerfile",
+            "context": f"{project_root}/batch",
+            "dockerfile": f"{project_root}/batch/Dockerfile",
         },
         "merger": {
-            "context": f"{project_root}/_deprecated/batch",
-            "dockerfile": f"{project_root}/_deprecated/batch/Dockerfile",
+            "context": f"{project_root}/batch",
+            "dockerfile": f"{project_root}/batch/Dockerfile",
         },
     }
 

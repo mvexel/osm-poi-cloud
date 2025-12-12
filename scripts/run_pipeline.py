@@ -79,7 +79,7 @@ class BatchPipelineRunner:
             download=f"{self.project_name}-download",
             sharder=f"{self.project_name}-sharder",
             processor=f"{self.project_name}-processor",
-            merge=f"{self.project_name}-merge",
+            merge=f"{self.project_name}-merger",  # Pulumi creates "merger" not "merge"
             tiles=f"{self.project_name}-tiles",
         )
 

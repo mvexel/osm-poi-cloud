@@ -24,6 +24,13 @@ def name(resource: str) -> str:
 max_vcpus = config.get_int("max_vcpus") or 256
 spot_bid_percentage = config.get_int("spot_bid_percentage") or 100
 
+# Data source configuration
+# Default to Utah for testing, use planet URL for production
+planet_url = config.get("planet_url") or "https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf"
+
+# Feature flags
+enable_cloudfront = config.get_bool("enable_cloudfront") or False  # Skip CloudFront in dev for faster iterations
+
 # Instance types for Batch compute environment (cost-effective general purpose)
 instance_types = [
     "c5.large", "c5.xlarge", "c5.2xlarge", "c5.4xlarge",

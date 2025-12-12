@@ -3,7 +3,7 @@
 import os
 import pulumi
 
-from config import name, account_id, region, project_name, environment
+from config import name, account_id, region, project_name, environment, planet_url, enable_cloudfront
 
 # Import infrastructure modules
 from s3 import create_data_bucket, create_pulumi_state_bucket, create_bucket_policy_for_cloudfront
@@ -39,7 +39,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # =============================================================================
 
 data_bucket = create_data_bucket()
-pulumi_state_bucket = create_pulumi_state_bucket()
+# Note: Not creating pulumi state bucket since we're using local backend
+# If you want to use S3 backend later, uncomment this:
+# pulumi_state_bucket = create_pulumi_state_bucket()
 
 # =============================================================================
 # ECR Repositories
@@ -103,29 +105,30 @@ job_definitions = create_all_job_definitions(
 )
 
 # =============================================================================
-# CloudFront Distribution
+# CloudFront Distribution (optional - slow to create, skip in dev)
 # =============================================================================
 
-oac = create_origin_access_control()
-cache_policy = create_cache_policy()
-origin_request_policy = create_origin_request_policy()
-response_headers_policy = create_response_headers_policy()
+if enable_cloudfront:
+    oac = create_origin_access_control()
+    cache_policy = create_cache_policy()
+    origin_request_policy = create_origin_request_policy()
+    response_headers_policy = create_response_headers_policy()
 
-distribution = create_distribution(
-    bucket_domain_name=data_bucket.bucket_regional_domain_name,
-    bucket_arn=data_bucket.arn,
-    oac_id=oac.id,
-    cache_policy_id=cache_policy.id,
-    origin_request_policy_id=origin_request_policy.id,
-    response_headers_policy_id=response_headers_policy.id,
-)
+    distribution = create_distribution(
+        bucket_domain_name=data_bucket.bucket_regional_domain_name,
+        bucket_arn=data_bucket.arn,
+        oac_id=oac.id,
+        cache_policy_id=cache_policy.id,
+        origin_request_policy_id=origin_request_policy.id,
+        response_headers_policy_id=response_headers_policy.id,
+    )
 
-# Create bucket policy after distribution (needs distribution ARN)
-bucket_policy = create_bucket_policy_for_cloudfront(
-    bucket=data_bucket,
-    cloudfront_oac_arn=oac.arn,
-    cloudfront_distribution_arn=distribution.arn,
-)
+    # Create bucket policy after distribution (needs distribution ARN)
+    bucket_policy = create_bucket_policy_for_cloudfront(
+        bucket=data_bucket,
+        cloudfront_oac_arn=oac.arn,
+        cloudfront_distribution_arn=distribution.arn,
+    )
 
 # =============================================================================
 # Exports
@@ -135,11 +138,12 @@ pulumi.export("project_name", project_name)
 pulumi.export("environment", environment)
 pulumi.export("region", region)
 pulumi.export("account_id", account_id)
+pulumi.export("planet_url", planet_url)
 
 # S3
 pulumi.export("data_bucket_name", data_bucket.bucket)
 pulumi.export("data_bucket_arn", data_bucket.arn)
-pulumi.export("pulumi_state_bucket_name", pulumi_state_bucket.bucket)
+# pulumi.export("pulumi_state_bucket_name", pulumi_state_bucket.bucket)
 
 # ECR
 pulumi.export("ecr_repository_urls", {
@@ -154,12 +158,17 @@ pulumi.export("job_definition_arns", {
     k: v.arn for k, v in job_definitions.items()
 })
 
-# CloudFront
-pulumi.export("cloudfront_distribution_id", distribution.id)
-pulumi.export("cloudfront_domain", distribution.domain_name)
-pulumi.export("tiles_url", distribution.domain_name.apply(
-    lambda domain: f"https://{domain}/pois.pmtiles"
-))
+# CloudFront (if enabled)
+if enable_cloudfront:
+    pulumi.export("cloudfront_distribution_id", distribution.id)
+    pulumi.export("cloudfront_domain", distribution.domain_name)
+    pulumi.export("tiles_url", distribution.domain_name.apply(
+        lambda domain: f"https://{domain}/pois.pmtiles"
+    ))
+else:
+    pulumi.export("tiles_url", data_bucket.bucket.apply(
+        lambda b: f"https://{b}.s3.{region}.amazonaws.com/pois.pmtiles"
+    ))
 
 # Image URIs
 pulumi.export("image_uris", image_uris)

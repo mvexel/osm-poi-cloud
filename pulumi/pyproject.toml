@@ -1,7 +1,13 @@
 [project]
-name = "pulumi"
+name = "osm-h3-pulumi"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pulumi infrastructure for OSM H3 processing"
+authors = ["Martijn van Exel <mvexel@gmail.com>"]
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.12.12"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "pulumi>=3.0.0,<4.0.0",
+    "pulumi-aws>=5.0.0,<6.0.0",
+    "pulumi-docker>=4.0.0,<5.0.0",
+]

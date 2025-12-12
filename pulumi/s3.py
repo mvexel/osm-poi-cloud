@@ -7,19 +7,19 @@ import json
 from config import name, account_id, default_tags
 
 
-def create_data_bucket() -> aws.s3.BucketV2:
+def create_data_bucket() -> aws.s3.Bucket:
     """Create the main data bucket for pipeline artifacts."""
-    bucket = aws.s3.BucketV2(
+    bucket = aws.s3.Bucket(
         name("data-bucket"),
         bucket=f"osm-h3-data-{account_id}",
         tags=default_tags,
     )
 
     # Enable versioning for data protection
-    aws.s3.BucketVersioningV2(
+    aws.s3.BucketVersioning(
         name("data-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
             status="Enabled",
         ),
     )
@@ -35,17 +35,17 @@ def create_data_bucket() -> aws.s3.BucketV2:
     )
 
     # Lifecycle rule to clean up old run data (optional - keep 30 days)
-    aws.s3.BucketLifecycleConfigurationV2(
+    aws.s3.BucketLifecycleConfiguration(
         name("data-bucket-lifecycle"),
         bucket=bucket.id,
         rules=[
-            aws.s3.BucketLifecycleConfigurationV2RuleArgs(
+            aws.s3.BucketLifecycleConfigurationRuleArgs(
                 id="cleanup-old-runs",
                 status="Enabled",
-                filter=aws.s3.BucketLifecycleConfigurationV2RuleFilterArgs(
+                filter=aws.s3.BucketLifecycleConfigurationRuleFilterArgs(
                     prefix="runs/",
                 ),
-                expiration=aws.s3.BucketLifecycleConfigurationV2RuleExpirationArgs(
+                expiration=aws.s3.BucketLifecycleConfigurationRuleExpirationArgs(
                     days=30,
                 ),
             ),
@@ -55,19 +55,19 @@ def create_data_bucket() -> aws.s3.BucketV2:
     return bucket
 
 
-def create_pulumi_state_bucket() -> aws.s3.BucketV2:
+def create_pulumi_state_bucket() -> aws.s3.Bucket:
     """Create bucket for Pulumi state storage."""
-    bucket = aws.s3.BucketV2(
+    bucket = aws.s3.Bucket(
         name("pulumi-state-bucket"),
         bucket=f"osm-h3-pulumi-state-{account_id}",
         tags=default_tags,
     )
 
     # Enable versioning for state protection
-    aws.s3.BucketVersioningV2(
+    aws.s3.BucketVersioning(
         name("pulumi-state-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
             status="Enabled",
         ),
     )
@@ -86,7 +86,7 @@ def create_pulumi_state_bucket() -> aws.s3.BucketV2:
 
 
 def create_bucket_policy_for_cloudfront(
-    bucket: aws.s3.BucketV2,
+    bucket: aws.s3.Bucket,
     cloudfront_oac_arn: pulumi.Output[str],
     cloudfront_distribution_arn: pulumi.Output[str],
 ) -> aws.s3.BucketPolicy:

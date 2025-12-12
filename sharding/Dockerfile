@@ -1,7 +1,7 @@
 # OSM-H3 Sharder
 # Rust-based H3 sharding for planet files
 
-FROM rust:1.83-slim-bookworm as builder
+FROM rust:1.92-bullseye AS builder
 
 WORKDIR /app
 

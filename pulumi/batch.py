@@ -12,6 +12,7 @@ from config import (
     instance_types,
     job_configs,
     region,
+    planet_url,
 )
 
 
@@ -24,7 +25,7 @@ def create_compute_environment(
     """Create EC2 Spot compute environment for Batch."""
     compute_env = aws.batch.ComputeEnvironment(
         name("compute-env"),
-        compute_environment_name="osm-h3-compute-env",
+        name_prefix="osm-h3-",
         type="MANAGED",
         state="ENABLED",
         service_role=service_role_arn,
@@ -136,18 +137,23 @@ def create_all_job_definitions(
     """Create job definitions for all pipeline stages."""
     job_definitions = {}
 
-    # Common environment variables
+    # Common environment variables passed to all jobs
     common_env = {
         "AWS_REGION": region,
+        "PLANET_URL": planet_url,
+    }
+
+    # Map job config names to image names (they differ in some cases)
+    job_to_image = {
+        "download": "downloader",
+        "sharder": "sharder",
+        "processor": "processor",
+        "merger": "merger",
+        "tiles": "tiles",
     }
 
     for job_name, config in job_configs.items():
-        # Map job name to image key (handle naming differences)
-        image_key = job_name
-        if job_name == "sharder":
-            image_key = "sharder"
-        elif job_name == "merger":
-            image_key = "merger"
+        image_key = job_to_image.get(job_name, job_name)
 
         # Skip if image not provided
         if image_key not in image_uris:
