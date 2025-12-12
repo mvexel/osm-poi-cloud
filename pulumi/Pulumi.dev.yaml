@@ -1,0 +1,5 @@
+config:
+  aws:region: us-west-2
+  osm-h3:environment: dev
+  osm-h3:max_vcpus: 256
+  osm-h3:spot_bid_percentage: 100

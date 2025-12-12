@@ -1,0 +1,6 @@
+name: osm-h3
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: Infrastructure for OSM-H3 data processing pipeline

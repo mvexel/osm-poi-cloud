@@ -1,0 +1,165 @@
+"""OSM-H3 Pipeline Infrastructure - Main Pulumi Program."""
+
+import os
+import pulumi
+
+from config import name, account_id, region, project_name, environment
+
+# Import infrastructure modules
+from s3 import create_data_bucket, create_pulumi_state_bucket, create_bucket_policy_for_cloudfront
+from ecr import create_ecr_repositories
+from iam import (
+    create_batch_execution_role,
+    create_batch_job_role,
+    create_batch_service_role,
+    create_spot_fleet_role,
+    create_batch_instance_role,
+)
+from vpc import get_default_vpc, get_default_subnets, create_batch_security_group
+from batch import (
+    create_compute_environment,
+    create_job_queue,
+    create_all_job_definitions,
+    create_log_groups,
+)
+from cloudfront import (
+    create_origin_access_control,
+    create_cache_policy,
+    create_origin_request_policy,
+    create_response_headers_policy,
+    create_distribution,
+)
+from images import create_all_images
+
+# Get project root (parent of pulumi directory)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# =============================================================================
+# S3 Buckets
+# =============================================================================
+
+data_bucket = create_data_bucket()
+pulumi_state_bucket = create_pulumi_state_bucket()
+
+# =============================================================================
+# ECR Repositories
+# =============================================================================
+
+ecr_repositories = create_ecr_repositories()
+
+# =============================================================================
+# IAM Roles
+# =============================================================================
+
+batch_execution_role = create_batch_execution_role()
+batch_job_role = create_batch_job_role(data_bucket.arn)
+batch_service_role = create_batch_service_role()
+spot_fleet_role = create_spot_fleet_role()
+batch_instance_profile = create_batch_instance_role()
+
+# =============================================================================
+# VPC & Networking
+# =============================================================================
+
+default_vpc = get_default_vpc()
+default_subnets = get_default_subnets(default_vpc.id)
+batch_security_group = create_batch_security_group(default_vpc.id)
+
+# =============================================================================
+# CloudWatch Log Groups
+# =============================================================================
+
+log_groups = create_log_groups()
+
+# =============================================================================
+# Docker Images (Build & Push to ECR)
+# =============================================================================
+
+image_uris = create_all_images(
+    repositories=ecr_repositories,
+    project_root=PROJECT_ROOT,
+)
+
+# =============================================================================
+# AWS Batch
+# =============================================================================
+
+compute_environment = create_compute_environment(
+    service_role_arn=batch_service_role.arn,
+    instance_profile_arn=batch_instance_profile.arn,
+    security_group_ids=[batch_security_group.id],
+    subnet_ids=default_subnets.ids,
+)
+
+job_queue = create_job_queue(
+    compute_environment_arn=compute_environment.arn,
+)
+
+job_definitions = create_all_job_definitions(
+    image_uris=image_uris,
+    execution_role_arn=batch_execution_role.arn,
+    job_role_arn=batch_job_role.arn,
+    bucket_name=data_bucket.bucket,
+)
+
+# =============================================================================
+# CloudFront Distribution
+# =============================================================================
+
+oac = create_origin_access_control()
+cache_policy = create_cache_policy()
+origin_request_policy = create_origin_request_policy()
+response_headers_policy = create_response_headers_policy()
+
+distribution = create_distribution(
+    bucket_domain_name=data_bucket.bucket_regional_domain_name,
+    bucket_arn=data_bucket.arn,
+    oac_id=oac.id,
+    cache_policy_id=cache_policy.id,
+    origin_request_policy_id=origin_request_policy.id,
+    response_headers_policy_id=response_headers_policy.id,
+)
+
+# Create bucket policy after distribution (needs distribution ARN)
+bucket_policy = create_bucket_policy_for_cloudfront(
+    bucket=data_bucket,
+    cloudfront_oac_arn=oac.arn,
+    cloudfront_distribution_arn=distribution.arn,
+)
+
+# =============================================================================
+# Exports
+# =============================================================================
+
+pulumi.export("project_name", project_name)
+pulumi.export("environment", environment)
+pulumi.export("region", region)
+pulumi.export("account_id", account_id)
+
+# S3
+pulumi.export("data_bucket_name", data_bucket.bucket)
+pulumi.export("data_bucket_arn", data_bucket.arn)
+pulumi.export("pulumi_state_bucket_name", pulumi_state_bucket.bucket)
+
+# ECR
+pulumi.export("ecr_repository_urls", {
+    k: v.repository_url for k, v in ecr_repositories.items()
+})
+
+# Batch
+pulumi.export("job_queue_name", job_queue.name)
+pulumi.export("job_queue_arn", job_queue.arn)
+pulumi.export("compute_environment_arn", compute_environment.arn)
+pulumi.export("job_definition_arns", {
+    k: v.arn for k, v in job_definitions.items()
+})
+
+# CloudFront
+pulumi.export("cloudfront_distribution_id", distribution.id)
+pulumi.export("cloudfront_domain", distribution.domain_name)
+pulumi.export("tiles_url", distribution.domain_name.apply(
+    lambda domain: f"https://{domain}/pois.pmtiles"
+))
+
+# Image URIs
+pulumi.export("image_uris", image_uris)

@@ -11,3 +11,8 @@ dependencies = [
     "pyarrow>=22.0.0",
     "spatialite>=0.0.3",
 ]
+
+[tool.uv.workspace]
+members = [
+    "pulumi",
+]
