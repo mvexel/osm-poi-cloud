@@ -23,8 +23,7 @@ def create_compute_environment(
     subnet_ids: pulumi.Input[Sequence[pulumi.Input[str]]],
 ) -> aws.batch.ComputeEnvironment:
     """Create EC2 Spot compute environment for Batch."""
-    compute_env = aws.batch.ComputeEnvironment(
-        name("compute-env"),
+    args = aws.batch.ComputeEnvironmentArgs(
         name_prefix="osm-h3-",
         type="MANAGED",
         state="ENABLED",
@@ -44,15 +43,14 @@ def create_compute_environment(
         tags=default_tags,
     )
 
-    return compute_env
+    return aws.batch.ComputeEnvironment(name("compute-env"), args)
 
 
 def create_job_queue(
     compute_environment_arn: pulumi.Output[str],
 ) -> aws.batch.JobQueue:
     """Create the job queue for the pipeline."""
-    queue = aws.batch.JobQueue(
-        name("job-queue"),
+    args = aws.batch.JobQueueArgs(
         name="osm-h3-queue",
         state="ENABLED",
         priority=1,
@@ -65,7 +63,7 @@ def create_job_queue(
         tags=default_tags,
     )
 
-    return queue
+    return aws.batch.JobQueue(name("job-queue"), args)
 
 
 def create_job_definition(
@@ -78,7 +76,7 @@ def create_job_definition(
     environment_vars: dict[str, str] | None = None,
 ) -> aws.batch.JobDefinition:
     """Create a Batch job definition."""
-    env_list = []
+    env_list: list[dict[str, str]] = []
     if environment_vars:
         env_list = [{"name": k, "value": v} for k, v in environment_vars.items()]
 
@@ -107,8 +105,7 @@ def create_job_definition(
         )
     )
 
-    job_def = aws.batch.JobDefinition(
-        name(f"job-{job_name}"),
+    args = aws.batch.JobDefinitionArgs(
         name=f"osm-h3-{job_name}",
         type="container",
         platform_capabilities=["EC2"],
@@ -116,21 +113,22 @@ def create_job_definition(
         tags=default_tags,
     )
 
-    return job_def
+    return aws.batch.JobDefinition(name(f"job-{job_name}"), args)
 
 
 def create_log_groups() -> dict[str, aws.cloudwatch.LogGroup]:
     """Create CloudWatch log groups for all job types."""
-    log_groups = {}
+    log_groups: dict[str, aws.cloudwatch.LogGroup] = {}
 
     for job_name in job_configs.keys():
-        log_group = aws.cloudwatch.LogGroup(
-            name(f"log-group-{job_name}"),
+        args = aws.cloudwatch.LogGroupArgs(
             name=f"/aws/batch/osm-h3-{job_name}",
             retention_in_days=14,
             tags=default_tags,
         )
-        log_groups[job_name] = log_group
+        log_groups[job_name] = aws.cloudwatch.LogGroup(
+            name(f"log-group-{job_name}"), args
+        )
 
     return log_groups
 
@@ -142,7 +140,7 @@ def create_all_job_definitions(
     bucket_name: pulumi.Output[str],
 ) -> dict[str, aws.batch.JobDefinition]:
     """Create job definitions for all pipeline stages."""
-    job_definitions = {}
+    job_definitions: dict[str, aws.batch.JobDefinition] = {}
 
     # Common environment variables passed to all jobs
     common_env = {

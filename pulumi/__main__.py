@@ -5,8 +5,6 @@ import pulumi
 import pulumi_aws as aws
 import json
 
-from pulumi_aws.lb import TargetGroupStickinessArgs
-
 from config import (
     name,
     project_name,
@@ -28,7 +26,6 @@ from ecr import create_ecr_repositories
 from iam import (
     create_batch_execution_role,
     create_batch_job_role,
-    create_batch_service_role,
     create_spot_fleet_role,
     create_batch_instance_role,
     create_sfn_role,
@@ -76,7 +73,6 @@ ecr_repositories = create_ecr_repositories()
 
 batch_execution_role = create_batch_execution_role()
 batch_job_role = create_batch_job_role(data_bucket.arn)
-batch_service_role = create_batch_service_role()
 spot_fleet_role = create_spot_fleet_role()
 batch_instance_profile = create_batch_instance_role()
 
