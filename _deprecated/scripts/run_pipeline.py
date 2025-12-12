@@ -60,7 +60,9 @@ class BatchPipelineRunner:
     ) -> None:
         session = boto3.Session(region_name=region or None)
         if session.region_name is None:
-            raise SystemExit("ERROR: AWS region not configured. Set AWS_REGION or pass --region.")
+            raise SystemExit(
+                "ERROR: AWS region not configured. Set AWS_REGION or pass --region."
+            )
 
         self.region = session.region_name
         self.project_name = project_name
@@ -129,13 +131,13 @@ class BatchPipelineRunner:
 
         start_index = STAGES.index(start_stage)
         stages_to_run = STAGES[start_index:]
-        
+
         job_ids = {}
-        
+
         # Submit jobs in order with dependencies
         for stage in stages_to_run:
             depends_on = []
-            
+
             # Determine dependency
             if stage == "shard" and "download" in job_ids:
                 depends_on = [{"jobId": job_ids["download"]}]
@@ -146,7 +148,7 @@ class BatchPipelineRunner:
                 depends_on = [{"jobId": jid} for jid in job_ids["process"]]
             elif stage == "tiles" and "merge" in job_ids:
                 depends_on = [{"jobId": job_ids["merge"]}]
-            
+
             print(f"Submitting {stage.upper()} stage...")
             if stage == "download":
                 job_ids["download"] = self._submit_download(depends_on)
@@ -158,9 +160,11 @@ class BatchPipelineRunner:
                 job_ids["merge"] = self._submit_merge(depends_on)
             elif stage == "tiles":
                 job_ids["tiles"] = self._submit_tiles(depends_on)
-        
+
         print("")
-        print("All jobs submitted! Use './pipeline_cli.py status --watch' to monitor progress.")
+        print(
+            "All jobs submitted! Use './pipeline_cli.py status --watch' to monitor progress."
+        )
         print(f"Run ID: {self.run_id}")
 
     def _run_download(self) -> None:
@@ -195,7 +199,9 @@ class BatchPipelineRunner:
         if self.max_resolution is not None:
             env.append({"name": "MAX_RESOLUTION", "value": str(self.max_resolution)})
         if self.max_nodes_per_shard is not None:
-            env.append({"name": "MAX_NODES_PER_SHARD", "value": str(self.max_nodes_per_shard)})
+            env.append(
+                {"name": "MAX_NODES_PER_SHARD", "value": str(self.max_nodes_per_shard)}
+            )
 
         return self._submit_job(
             name=f"{self.run_id}-shard",
@@ -215,9 +221,9 @@ class BatchPipelineRunner:
         # might not be ready yet. We'll use a workaround: submit a placeholder that
         # will be replaced by actual jobs once shard completes.
         # Better: use AWS Batch array jobs, but for now keep it simple and load manifest.
-        
+
         manifest_key = f"runs/{self.run_id}/shards/manifest.json"
-        
+
         # If async mode with dependency, we can't load shards yet (shard job not done)
         # We'll need to either: 1) use array job, or 2) submit a wrapper job
         # For simplicity, let's assume manifest exists or will exist (user re-running)
@@ -228,14 +234,20 @@ class BatchPipelineRunner:
             if depends_on:
                 # Async mode: manifest doesn't exist yet, can't submit process jobs
                 # Would need array job or wrapper job. For now, show message.
-                print(f"WARNING: Cannot submit process jobs in async mode yet (manifest not ready).")
-                print(f"You'll need to run the process stage separately after shard completes.")
+                print(
+                    f"WARNING: Cannot submit process jobs in async mode yet (manifest not ready)."
+                )
+                print(
+                    f"You'll need to run the process stage separately after shard completes."
+                )
                 return []
             else:
                 raise
-        
+
         if not shards:
-            raise SystemExit(f"ERROR: No shards found in s3://{self.bucket}/{manifest_key}")
+            raise SystemExit(
+                f"ERROR: No shards found in s3://{self.bucket}/{manifest_key}"
+            )
 
         print(f"Submitting {len(shards)} shard processing jobs...")
         job_ids = []
@@ -254,7 +266,7 @@ class BatchPipelineRunner:
                 depends_on=depends_on,
             )
             job_ids.append(job_id)
-        
+
         return job_ids
 
     def _run_merge(self) -> None:
@@ -310,7 +322,7 @@ class BatchPipelineRunner:
         }
         if depends_on:
             kwargs["dependsOn"] = depends_on
-        
+
         response = self.batch.submit_job(**kwargs)
         job_id = response["jobId"]
         deps_info = f" (depends on {len(depends_on)} job(s))" if depends_on else ""
@@ -331,7 +343,9 @@ class BatchPipelineRunner:
                 return
             time.sleep(15)
 
-    def _wait_for_jobs(self, job_ids: Sequence[str], *, label: str, poll_seconds: int) -> None:
+    def _wait_for_jobs(
+        self, job_ids: Sequence[str], *, label: str, poll_seconds: int
+    ) -> None:
         """Poll a batch of jobs until they all finish."""
         remaining = set(job_ids)
         finished = 0
@@ -345,8 +359,12 @@ class BatchPipelineRunner:
                     finished += 1
                     if status == "FAILED":
                         reason = job.get("statusReason", "Unknown reason")
-                        raise SystemExit(f"{label.capitalize()} job {job['jobName']} failed: {reason}")
-                    print(f"[{finished}/{len(job_ids)}] {label} job {job['jobName']} succeeded")
+                        raise SystemExit(
+                            f"{label.capitalize()} job {job['jobName']} failed: {reason}"
+                        )
+                    print(
+                        f"[{finished}/{len(job_ids)}] {label} job {job['jobName']} succeeded"
+                    )
             time.sleep(poll_seconds)
         print(f"All {label} jobs completed.")
 
@@ -375,10 +393,18 @@ class BatchPipelineRunner:
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the OSM-H3 pipeline via AWS Batch.")
+    parser = argparse.ArgumentParser(
+        description="Run the OSM-H3 pipeline via AWS Batch."
+    )
     parser.add_argument("--region", help="AWS region (defaults to AWS_REGION env var).")
-    parser.add_argument("--project-name", default="osm-h3", help="Resource prefix (default: %(default)s).")
-    parser.add_argument("--run-id", help="Identifier for this run (default: planet-<timestamp>).")
+    parser.add_argument(
+        "--project-name",
+        default="osm-h3",
+        help="Resource prefix (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--run-id", help="Identifier for this run (default: planet-<timestamp>)."
+    )
     parser.add_argument("--bucket", help="Override the S3 bucket name.")
     parser.add_argument("--job-queue", help="Override the AWS Batch job queue name.")
     parser.add_argument("--planet-url", help="Optional custom planet file URL.")
@@ -414,7 +440,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv or sys.argv[1:])
-    region = args.region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    region = (
+        args.region
+        or os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+    )
     run_id = args.run_id or f"planet-{datetime.utcnow():%Y%m%d-%H%M%S}"
 
     runner = BatchPipelineRunner(

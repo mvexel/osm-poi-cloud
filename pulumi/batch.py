@@ -153,7 +153,7 @@ def create_all_job_definitions(
 
     # Map job config names to image names (they differ in some cases)
     job_to_image = {
-        "download": "downloader",
+        "download": "download",
         "sharder": "sharder",
         "processor": "processor",
         "merger": "merger",

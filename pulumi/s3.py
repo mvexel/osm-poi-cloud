@@ -16,10 +16,10 @@ def create_data_bucket() -> aws.s3.Bucket:
     )
 
     # Enable versioning for data protection
-    aws.s3.BucketVersioning(
+    aws.s3.BucketVersioningV2(
         name("data-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
             status="Enabled",
         ),
     )
@@ -35,17 +35,17 @@ def create_data_bucket() -> aws.s3.Bucket:
     )
 
     # Lifecycle rule to clean up old run data (optional - keep 30 days)
-    aws.s3.BucketLifecycleConfiguration(
+    aws.s3.BucketLifecycleConfigurationV2(
         name("data-bucket-lifecycle"),
         bucket=bucket.id,
         rules=[
-            aws.s3.BucketLifecycleConfigurationRuleArgs(
+            aws.s3.BucketLifecycleConfigurationV2RuleArgs(
                 id="cleanup-old-runs",
                 status="Enabled",
-                filter=aws.s3.BucketLifecycleConfigurationRuleFilterArgs(
+                filter=aws.s3.BucketLifecycleConfigurationV2RuleFilterArgs(
                     prefix="runs/",
                 ),
-                expiration=aws.s3.BucketLifecycleConfigurationRuleExpirationArgs(
+                expiration=aws.s3.BucketLifecycleConfigurationV2RuleExpirationArgs(
                     days=30,
                 ),
             ),
@@ -64,10 +64,10 @@ def create_pulumi_state_bucket() -> aws.s3.Bucket:
     )
 
     # Enable versioning for state protection
-    aws.s3.BucketVersioning(
+    aws.s3.BucketVersioningV2(
         name("pulumi-state-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
             status="Enabled",
         ),
     )
@@ -91,27 +91,23 @@ def create_bucket_policy_for_cloudfront(
     cloudfront_distribution_arn: pulumi.Output[str],
 ) -> aws.s3.BucketPolicy:
     """Create bucket policy allowing CloudFront access to tiles."""
-    policy_document = pulumi.Output.all(
-        bucket.arn, cloudfront_distribution_arn
-    ).apply(lambda args: json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [
+    policy_document = pulumi.Output.all(bucket.arn, cloudfront_distribution_arn).apply(
+        lambda args: json.dumps(
             {
-                "Sid": "AllowCloudFrontServicePrincipal",
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": "cloudfront.amazonaws.com"
-                },
-                "Action": "s3:GetObject",
-                "Resource": f"{args[0]}/tiles/*",
-                "Condition": {
-                    "StringEquals": {
-                        "AWS:SourceArn": args[1]
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "AllowCloudFrontServicePrincipal",
+                        "Effect": "Allow",
+                        "Principal": {"Service": "cloudfront.amazonaws.com"},
+                        "Action": "s3:GetObject",
+                        "Resource": f"{args[0]}/tiles/*",
+                        "Condition": {"StringEquals": {"AWS:SourceArn": args[1]}},
                     }
-                }
+                ],
             }
-        ]
-    }))
+        )
+    )
 
     return aws.s3.BucketPolicy(
         name("data-bucket-policy"),

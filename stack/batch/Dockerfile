@@ -20,8 +20,6 @@ RUN python3 -c "import duckdb; conn = duckdb.connect(); conn.sql('INSTALL spatia
 
 # Copy processing scripts
 COPY processor.py /app/processor.py
-COPY process_region.py /app/process_region.py
-RUN chmod +x /app/processor.py /app/process_region.py
 
 WORKDIR /app
 

@@ -67,7 +67,7 @@ def create_all_images(
             "dockerfile": f"{project_root}/batch/Dockerfile",
         },
         # Download and merge use the same image as processor with different STAGE
-        "downloader": {
+        "download": {
             "context": f"{project_root}/batch",
             "dockerfile": f"{project_root}/batch/Dockerfile",
         },

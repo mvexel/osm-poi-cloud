@@ -4,7 +4,7 @@ import json
 import pulumi
 import pulumi_aws as aws
 
-from config import name, default_tags, region, account_id
+from config import name, project_name, default_tags, region, account_id
 
 
 def create_batch_execution_role() -> aws.iam.Role:
@@ -219,3 +219,111 @@ def create_batch_instance_role() -> aws.iam.InstanceProfile:
     )
 
     return instance_profile
+
+
+def create_sfn_role(
+    job_queue_arn: pulumi.Output[str],
+    job_definition_arns: dict[str, pulumi.Output[str]],
+    lambda_arn: pulumi.Output[str],
+) -> aws.iam.Role:
+    """Create the IAM role for the Step Functions state machine."""
+    role = aws.iam.Role(
+        name(f"sfn-role"),
+        name=f"{project_name}-sfn-role",
+        assume_role_policy=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {"Service": "states.amazonaws.com"},
+                        "Action": "sts:AssumeRole",
+                    }
+                ],
+            }
+        ),
+        tags=default_tags,
+    )
+    # Policy to allow invoking Batch and Lambda
+    policy_document = pulumi.Output.all(
+        job_queue_arn, lambda_arn, *job_definition_arns.values()
+    ).apply(
+        lambda args: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["batch:SubmitJob", "batch:DescribeJobs", "batch:TerminateJob"],
+                        "Resource": [args[0], *args[2:]], # job_queue_arn and job_definition_arns
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["lambda:InvokeFunction"],
+                        "Resource": args[1], # lambda_arn
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "events:PutTargets",
+                            "events:PutRule",
+                            "events:DescribeRule"
+                        ],
+                        "Resource": f"arn:aws:events:{region}:{account_id}:rule/StepFunctionsGetEventsForBatchJobsRule"
+                    }
+                ],
+            }
+        )
+    )
+    aws.iam.RolePolicy(
+        name("sfn-policy"),
+        role=role.id,
+        policy=policy_document,
+    )
+    return role
+
+def create_lambda_role(bucket_arn: pulumi.Output[str]) -> aws.iam.Role:
+    """Create the IAM role for the GetManifest Lambda function."""
+    role = aws.iam.Role(
+        name("lambda-get-manifest-role"),
+        name=f"{project_name}-lambda-get-manifest-role",
+        assume_role_policy=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Action": "sts:AssumeRole",
+                        "Principal": {"Service": "lambda.amazonaws.com"},
+                        "Effect": "Allow",
+                    }
+                ],
+            }
+        ),
+        tags=default_tags,
+    )
+    # Policy for S3 read and CloudWatch logs
+    policy_document = bucket_arn.apply(
+        lambda arn: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject"],
+                        "Resource": f"{arn}/runs/*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+                        "Resource": "*",
+                    },
+                ],
+            }
+        )
+    )
+    aws.iam.RolePolicy(
+        name("lambda-get-manifest-policy"),
+        role=role.id,
+        policy=policy_document,
+    )
+    return role

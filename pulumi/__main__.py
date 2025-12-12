@@ -2,12 +2,17 @@
 
 import os
 import pulumi
+import pulumi_aws as aws
+import json
+
+from pulumi_aws.lb import TargetGroupStickinessArgs
 
 from config import (
     name,
+    project_name,
+    default_tags,
     account_id,
     region,
-    project_name,
     environment,
     planet_url,
     enable_cloudfront,
@@ -26,6 +31,8 @@ from iam import (
     create_batch_service_role,
     create_spot_fleet_role,
     create_batch_instance_role,
+    create_sfn_role,
+    create_lambda_role,
 )
 from vpc import get_default_vpc, get_default_subnets, create_batch_security_group
 from batch import (
@@ -119,6 +126,69 @@ job_definitions = create_all_job_definitions(
 )
 
 # =============================================================================
+# Step Functions & Lambda
+# =============================================================================
+
+get_manifest_lambda_role = create_lambda_role(data_bucket.arn)
+
+get_manifest_lambda = aws.lambda_.Function(
+    f"{project_name}-get-manifest",
+    runtime="python3.11",
+    handler="get_manifest.handler",
+    role=get_manifest_lambda_role.arn,
+    code=pulumi.AssetArchive({
+        ".": pulumi.FileArchive("./lambdas"),
+    }),
+    environment={
+        "variables": {
+            "DATA_BUCKET_NAME": data_bucket.bucket,
+        }
+    }
+)
+
+sfn_role = create_sfn_role(
+    job_queue_arn=job_queue.arn,
+    job_definition_arns={
+        "download": job_definitions["download"].arn,
+        "sharder": job_definitions["sharder"].arn,
+        "processor": job_definitions["processor"].arn,
+        "merger": job_definitions["merger"].arn,
+        "tiles": job_definitions["tiles"].arn,
+    },
+    lambda_arn=get_manifest_lambda.arn,
+)
+
+with open("statemachine.json") as f:
+    statemachine_definition_template = f.read()
+
+statemachine_definition = pulumi.Output.all(
+    JobQueueArn=job_queue.arn,
+    DownloadJobDefArn=job_definitions["download"].arn,
+    SharderJobDefArn=job_definitions["sharder"].arn,
+    ProcessorJobDefArn=job_definitions["processor"].arn,
+    MergerJobDefArn=job_definitions["merger"].arn,
+    TilesJobDefArn=job_definitions["tiles"].arn,
+    GetManifestJobDefArn=get_manifest_lambda.arn,
+).apply(
+    lambda args: json.dumps(
+        json.loads(
+            statemachine_definition_template.replace(
+                "${JobQueueArn}", args["JobQueueArn"]).replace(
+                "${DownloadJobDefArn}", args["DownloadJobDefArn"]).replace(
+                "${SharderJobDefArn}", args["SharderJobDefArn"]).replace(
+                "${ProcessorJobDefArn}", args["ProcessorJobDefArn"]).replace(
+                "${MergerJobDefArn}", args["MergerJobDefArn"]).replace(
+                "${TilesJobDefArn}", args["TilesJobDefArn"]).replace(
+                "${GetManifestJobDefArn}", args["GetManifestJobDefArn"]))))
+
+pipeline_sfn = aws.sfn.StateMachine(
+    f"{project_name}-pipeline-sfn",
+    role_arn=sfn_role.arn,
+    definition=statemachine_definition,
+    tags=default_tags,
+)
+
+# =============================================================================
 # CloudFront Distribution (optional - slow to create, skip in dev)
 # =============================================================================
 
@@ -188,3 +258,4 @@ else:
 
 # Image URIs
 pulumi.export("image_uris", image_uris)
+pulumi.export("state_machine_arn", pipeline_sfn.id)

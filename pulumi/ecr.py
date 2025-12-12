@@ -7,7 +7,7 @@ from config import name, default_tags
 
 # Repository names for each pipeline stage
 REPO_NAMES = [
-    "downloader",
+    "download",
     "sharder",
     "processor",
     "merger",

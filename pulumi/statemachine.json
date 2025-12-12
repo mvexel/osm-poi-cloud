@@ -1,0 +1,132 @@
+{
+  "Comment": "Orchestrates the OSM-H3 AWS Batch pipeline",
+  "StartAt": "Run Download Job",
+  "States": {
+    "Run Download Job": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName.$": "States.Format('osm-h3-download-{}', $$.Execution.Name)",
+        "JobQueue": "${JobQueueArn}",
+        "JobDefinition": "${DownloadJobDefArn}",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "RUN_ID",
+              "Value.$": "$.run_id"
+            }
+          ]
+        }
+      },
+      "Next": "Run Shard Job"
+    },
+    "Run Shard Job": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName.$": "States.Format('osm-h3-shard-{}', $$.Execution.Name)",
+        "JobQueue": "${JobQueueArn}",
+        "JobDefinition": "${ShardJobDefArn}",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "RUN_ID",
+              "Value.$": "$.run_id"
+            }
+          ]
+        }
+      },
+      "ResultPath": "$.shard_job_output",
+      "Next": "Get Shard Manifest"
+    },
+    "Get Shard Manifest": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${GetManifestLambdaArn}",
+        "Payload": {
+          "run_id.$": "$.run_id"
+        }
+      },
+      "ResultSelector": {
+        "shards.$": "$.Payload.shards"
+      },
+      "ResultPath": "$.manifest",
+      "Next": "Process Shards"
+    },
+    "Process Shards": {
+      "Type": "Map",
+      "InputPath": "$.manifest.shards",
+      "MaxConcurrency": 50,
+      "Iterator": {
+        "StartAt": "Run Process Job",
+        "States": {
+          "Run Process Job": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::batch:submitJob.sync",
+            "Parameters": {
+              "JobName.$": "States.Format('osm-h3-process-{}-{}', $$.Execution.Name, $.h3_index)",
+              "JobQueue": "${JobQueueArn}",
+              "JobDefinition": "${ProcessJobDefArn}",
+              "ContainerOverrides": {
+                "Environment": [
+                  {
+                    "Name": "RUN_ID",
+                    "Value.$": "$$.Execution.Input.run_id"
+                  },
+                  {
+                    "Name": "SHARD_H3_INDEX",
+                    "Value.$": "$.h3_index"
+                  },
+                  {
+                    "Name": "SHARD_RESOLUTION",
+                    "Value.$": "States.Format('{}', $.resolution)"
+                  }
+                ]
+              }
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Run Merge Job"
+    },
+    "Run Merge Job": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName.$": "States.Format('osm-h3-merge-{}', $$.Execution.Name)",
+        "JobQueue": "${JobQueueArn}",
+        "JobDefinition": "${MergeJobDefArn}",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "RUN_ID",
+              "Value.$": "$.run_id"
+            }
+          ]
+        }
+      },
+      "Next": "Run Tiles Job"
+    },
+    "Run Tiles Job": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName.$": "States.Format('osm-h3-tiles-{}', $$.Execution.Name)",
+        "JobQueue": "${JobQueueArn}",
+        "JobDefinition": "${TilesJobDefArn}",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "RUN_ID",
+              "Value.$": "$.run_id"
+            }
+          ]
+        }
+      },
+      "End": true
+    }
+  }
+}
