@@ -87,7 +87,6 @@ def create_pulumi_state_bucket() -> aws.s3.Bucket:
 
 def create_bucket_policy_for_cloudfront(
     bucket: aws.s3.Bucket,
-    cloudfront_oac_arn: pulumi.Output[str],
     cloudfront_distribution_arn: pulumi.Output[str],
 ) -> aws.s3.BucketPolicy:
     """Create bucket policy allowing CloudFront access to tiles."""

@@ -155,99 +155,90 @@ If resources were modified outside Pulumi (e.g., via AWS Console):
 pulumi refresh
 ```
 
-## Pipeline CLI
+## Running the Pipeline
 
-Once infrastructure is deployed, use `pipeline_cli.py` to orchestrate the data processing pipeline.
+There are two ways to run the OSM-H3 pipeline: using the **Step Functions state machine** (recommended for production) or the **Pipeline CLI** (for development/testing).
 
-### Run the Pipeline
+### Option 1: Step Functions State Machine (Recommended)
 
-```bash
-# Run the full pipeline (download → shard → process → merge → tiles)
-./pipeline_cli.py run
+The state machine orchestrates all stages automatically with proper error handling and retry logic.
 
-# Start from a specific stage (e.g., skip download if planet.pbf already exists)
-./pipeline_cli.py run --start-at shard
-
-# Use a custom region extract instead of full planet
-./pipeline_cli.py run --planet-url https://download.geofabrik.de/north-america/us/california-latest.osm.pbf
-
-# Custom run ID
-./pipeline_cli.py run --run-id california-test-20240101
-
-# Override max H3 resolution or nodes per shard
-./pipeline_cli.py run --max-resolution 9 --max-nodes-per-shard 2000000
-
-# Async mode: submit all jobs with dependencies and return immediately
-./pipeline_cli.py run --async
-# Then monitor in another terminal:
-./pipeline_cli.py status --watch
-```
-
-Available stages (use with `--start-at`):
-- `download`: Download planet/region PBF file
-- `shard`: Split PBF into H3-indexed shards
-- `process`: Extract POIs from each shard in parallel
-- `merge`: Combine all POI Parquet files
-- `tiles`: Generate PMTiles for visualization
-
-#### Synchronous vs Async Mode
-
-**Synchronous (default)**: The CLI waits for each stage to complete before moving to the next. This is useful for seeing immediate progress and errors.
+#### Get the State Machine ARN
 
 ```bash
-./pipeline_cli.py run  # Blocks until all stages complete
+cd pulumi
+pulumi stack output state_machine_arn
 ```
 
-**Async mode (`--async`)**: Submits all jobs with AWS Batch dependencies and returns immediately. Jobs automatically wait for their dependencies to complete. Use this for long-running pipelines where you want to monitor separately.
+#### Start an Execution
 
 ```bash
-# Terminal 1: Submit jobs and return
-./pipeline_cli.py run --async
+# Generate a unique run ID (e.g., timestamp)
+RUN_ID="run-$(date +%Y%m%d-%H%M%S)"
 
-# Terminal 2: Watch progress
-./pipeline_cli.py status --watch
+# Start the execution
+aws stepfunctions start-execution \
+  --state-machine-arn $(pulumi stack output state_machine_arn) \
+  --name "$RUN_ID" \
+  --input "{\"run_id\": \"$RUN_ID\"}"
 ```
 
-### Monitor Pipeline Progress
+**Required Input Parameters:**
+- `run_id`: Unique identifier for this pipeline run (used for S3 paths)
 
-```bash
-# Watch job status continuously
-./pipeline_cli.py status --watch
-
-# Single snapshot
-./pipeline_cli.py status
-
-# Custom refresh interval (default 30s)
-./pipeline_cli.py status --watch --interval 10
-```
-
-The status command shows:
-- Job counts by status (SUBMITTED, RUNNING, SUCCEEDED, FAILED, etc.)
-- Currently running jobs with start times
-- Total Parquet files written to S3
-
-### Pipeline CLI Options
-
-All commands support:
-- `--region`: AWS region (defaults to `AWS_REGION` environment variable)
-- `--project-name`: Resource prefix (default: `osm-h3`)
-- `--bucket`: Override S3 bucket name
-- `--job-queue`: Override AWS Batch job queue name
-
-## Environment Variables
-
-The pipeline respects these environment variables:
-
-- `AWS_REGION` / `AWS_DEFAULT_REGION`: Default AWS region
+**Optional Environment Variables (set in Pulumi config):**
+- `PLANET_URL`: OSM data source (default: configured in `pulumi/config.py`)
 - `MAX_RESOLUTION`: H3 resolution for sharding (default: 7)
-- `MAX_NODES_PER_SHARD`: Max nodes per shard file (default: 1000000)
+- `MAX_NODES_PER_SHARD`: Max nodes per shard (default: 1000000)
 
-Override via CLI flags or export before running:
+#### Monitor Execution
 
 ```bash
-export AWS_REGION=us-west-2
-export MAX_RESOLUTION=8
-./pipeline_cli.py run
+# Get execution ARN from start-execution output, or construct it:
+EXECUTION_ARN="arn:aws:states:REGION:ACCOUNT_ID:execution:osm-h3-pipeline-sfn:$RUN_ID"
+
+# Check execution status
+aws stepfunctions describe-execution \
+  --execution-arn "$EXECUTION_ARN"
+
+# Get execution history (all state transitions)
+aws stepfunctions get-execution-history \
+  --execution-arn "$EXECUTION_ARN"
+
+# Watch in AWS Console
+# https://console.aws.amazon.com/states/home?region=REGION#/statemachines
+```
+
+#### State Machine Flow
+
+The pipeline executes these stages sequentially:
+
+1. **Download Job**: Download planet.osm.pbf to S3
+2. **Shard Job**: Split PBF into H3-indexed shards
+3. **Get Manifest**: Lambda reads shard manifest from S3
+4. **Process Shards**: Map state runs up to 50 parallel Batch jobs per shard
+5. **Merge Job**: Combine all shard Parquet files
+6. **Tiles Job**: Generate PMTiles for visualization
+
+Each Batch job waits for the previous stage to complete before starting.
+
+#### Check Job Logs
+
+```bash
+# View CloudWatch logs for a specific stage
+aws logs tail /aws/batch/osm-h3-download --follow
+aws logs tail /aws/batch/osm-h3-sharder --follow
+aws logs tail /aws/batch/osm-h3-processor --follow
+aws logs tail /aws/batch/osm-h3-merger --follow
+aws logs tail /aws/batch/osm-h3-tiles --follow
+```
+
+#### Stop a Running Execution
+
+```bash
+aws stepfunctions stop-execution \
+  --execution-arn "$EXECUTION_ARN" \
+  --cause "Manual stop"
 ```
 
 ## Troubleshooting

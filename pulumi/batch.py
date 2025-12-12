@@ -1,6 +1,7 @@
 """AWS Batch compute environment, queue, and job definitions."""
 
 import json
+from typing import Sequence
 import pulumi
 import pulumi_aws as aws
 
@@ -17,10 +18,9 @@ from config import (
 
 
 def create_compute_environment(
-    service_role_arn: pulumi.Output[str],
     instance_profile_arn: pulumi.Output[str],
-    security_group_ids: list[str],
-    subnet_ids: list[str],
+    security_group_ids: pulumi.Input[Sequence[pulumi.Input[str]]],
+    subnet_ids: pulumi.Input[Sequence[pulumi.Input[str]]],
 ) -> aws.batch.ComputeEnvironment:
     """Create EC2 Spot compute environment for Batch."""
     compute_env = aws.batch.ComputeEnvironment(
@@ -28,7 +28,6 @@ def create_compute_environment(
         name_prefix="osm-h3-",
         type="MANAGED",
         state="ENABLED",
-        service_role=service_role_arn,
         compute_resources=aws.batch.ComputeEnvironmentComputeResourcesArgs(
             type="SPOT",
             allocation_strategy="SPOT_CAPACITY_OPTIMIZED",
@@ -59,9 +58,9 @@ def create_job_queue(
         priority=1,
         compute_environment_orders=[
             aws.batch.JobQueueComputeEnvironmentOrderArgs(
-                order=1,
                 compute_environment=compute_environment_arn,
-            ),
+                order=1,
+            )
         ],
         tags=default_tags,
     )

@@ -108,7 +108,6 @@ image_uris = create_all_images(
 # =============================================================================
 
 compute_environment = create_compute_environment(
-    service_role_arn=batch_service_role.arn,
     instance_profile_arn=batch_instance_profile.arn,
     security_group_ids=[batch_security_group.id],
     subnet_ids=default_subnets.ids,
@@ -136,14 +135,16 @@ get_manifest_lambda = aws.lambda_.Function(
     runtime="python3.11",
     handler="get_manifest.handler",
     role=get_manifest_lambda_role.arn,
-    code=pulumi.AssetArchive({
-        ".": pulumi.FileArchive("./lambdas"),
-    }),
+    code=pulumi.AssetArchive(
+        {
+            ".": pulumi.FileArchive("./lambdas"),
+        }
+    ),
     environment={
         "variables": {
             "DATA_BUCKET_NAME": data_bucket.bucket,
         }
-    }
+    },
 )
 
 sfn_role = create_sfn_role(
@@ -173,13 +174,17 @@ statemachine_definition = pulumi.Output.all(
     lambda args: json.dumps(
         json.loads(
             statemachine_definition_template.replace(
-                "${JobQueueArn}", args["JobQueueArn"]).replace(
-                "${DownloadJobDefArn}", args["DownloadJobDefArn"]).replace(
-                "${SharderJobDefArn}", args["SharderJobDefArn"]).replace(
-                "${ProcessorJobDefArn}", args["ProcessorJobDefArn"]).replace(
-                "${MergerJobDefArn}", args["MergerJobDefArn"]).replace(
-                "${TilesJobDefArn}", args["TilesJobDefArn"]).replace(
-                "${GetManifestJobDefArn}", args["GetManifestJobDefArn"]))))
+                "${JobQueueArn}", args["JobQueueArn"]
+            )
+            .replace("${DownloadJobDefArn}", args["DownloadJobDefArn"])
+            .replace("${SharderJobDefArn}", args["SharderJobDefArn"])
+            .replace("${ProcessorJobDefArn}", args["ProcessorJobDefArn"])
+            .replace("${MergerJobDefArn}", args["MergerJobDefArn"])
+            .replace("${TilesJobDefArn}", args["TilesJobDefArn"])
+            .replace("${GetManifestJobDefArn}", args["GetManifestJobDefArn"])
+        )
+    )
+)
 
 pipeline_sfn = aws.sfn.StateMachine(
     f"{project_name}-pipeline-sfn",
@@ -210,7 +215,6 @@ if enable_cloudfront:
     # Create bucket policy after distribution (needs distribution ARN)
     bucket_policy = create_bucket_policy_for_cloudfront(
         bucket=data_bucket,
-        cloudfront_oac_arn=oac.arn,
         cloudfront_distribution_arn=distribution.arn,
     )
 
