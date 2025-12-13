@@ -5,12 +5,11 @@ import pulumi_aws as aws
 from config import name, default_tags
 
 
-# Repository names for each pipeline stage
+# Repository names for each pipeline image
+# Note: "batch" image is shared by download, processor, and merger jobs
 REPO_NAMES = [
-    "download",
+    "batch",     # shared by download, processor, merger
     "sharder",
-    "processor",
-    "merger",
     "tiles",
 ]
 

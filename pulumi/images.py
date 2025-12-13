@@ -51,7 +51,12 @@ def create_all_images(
 
     # Image configurations: name -> (context_path, dockerfile_path)
     # Paths are relative to project root
+    # Note: "batch" image is shared by download, processor, and merger jobs
     image_configs = {
+        "batch": {
+            "context": f"{project_root}/batch",
+            "dockerfile": f"{project_root}/batch/Dockerfile",
+        },
         "sharder": {
             "context": f"{project_root}/sharding",
             "dockerfile": f"{project_root}/sharding/Dockerfile",
@@ -59,21 +64,6 @@ def create_all_images(
         "tiles": {
             "context": f"{project_root}/tiles",
             "dockerfile": f"{project_root}/tiles/Dockerfile",
-        },
-        # The batch processor handles download, process, and merge stages
-        # based on STAGE environment variable
-        "processor": {
-            "context": f"{project_root}/batch",
-            "dockerfile": f"{project_root}/batch/Dockerfile",
-        },
-        # Download and merge use the same image as processor with different STAGE
-        "download": {
-            "context": f"{project_root}/batch",
-            "dockerfile": f"{project_root}/batch/Dockerfile",
-        },
-        "merger": {
-            "context": f"{project_root}/batch",
-            "dockerfile": f"{project_root}/batch/Dockerfile",
         },
     }
 

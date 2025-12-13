@@ -16,10 +16,10 @@ def create_data_bucket() -> aws.s3.Bucket:
     )
 
     # Enable versioning for data protection
-    aws.s3.BucketVersioningV2(
+    aws.s3.BucketVersioning(
         name("data-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
             status="Enabled",
         ),
     )
@@ -35,17 +35,17 @@ def create_data_bucket() -> aws.s3.Bucket:
     )
 
     # Lifecycle rule to clean up old run data (optional - keep 30 days)
-    aws.s3.BucketLifecycleConfigurationV2(
+    aws.s3.BucketLifecycleConfiguration(
         name("data-bucket-lifecycle"),
         bucket=bucket.id,
         rules=[
-            aws.s3.BucketLifecycleConfigurationV2RuleArgs(
+            aws.s3.BucketLifecycleConfigurationRuleArgs(
                 id="cleanup-old-runs",
                 status="Enabled",
-                filter=aws.s3.BucketLifecycleConfigurationV2RuleFilterArgs(
+                filter=aws.s3.BucketLifecycleConfigurationRuleFilterArgs(
                     prefix="runs/",
                 ),
-                expiration=aws.s3.BucketLifecycleConfigurationV2RuleExpirationArgs(
+                expiration=aws.s3.BucketLifecycleConfigurationRuleExpirationArgs(
                     days=30,
                 ),
             ),
@@ -64,10 +64,10 @@ def create_pulumi_state_bucket() -> aws.s3.Bucket:
     )
 
     # Enable versioning for state protection
-    aws.s3.BucketVersioningV2(
+    aws.s3.BucketVersioning(
         name("pulumi-state-bucket-versioning"),
         bucket=bucket.id,
-        versioning_configuration=aws.s3.BucketVersioningV2VersioningConfigurationArgs(
+        versioning_configuration=aws.s3.BucketVersioningVersioningConfigurationArgs(
             status="Enabled",
         ),
     )

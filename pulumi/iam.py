@@ -147,6 +147,28 @@ def create_batch_service_role() -> aws.iam.Role:
         policy_arn="arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole",
     )
 
+    # CloudWatch Logs permissions for Batch service
+    logs_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "logs:DescribeLogGroups",
+                    ],
+                    "Resource": "*",
+                }
+            ],
+        }
+    )
+
+    aws.iam.RolePolicy(
+        name("batch-service-role-logs-policy"),
+        role=role.name,
+        policy=logs_policy,
+    )
+
     return role
 
 

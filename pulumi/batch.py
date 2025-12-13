@@ -19,6 +19,7 @@ from config import (
 
 def create_compute_environment(
     instance_profile_arn: pulumi.Output[str],
+    service_role_arn: pulumi.Output[str],
     security_group_ids: pulumi.Input[Sequence[pulumi.Input[str]]],
     subnet_ids: pulumi.Input[Sequence[pulumi.Input[str]]],
 ) -> aws.batch.ComputeEnvironment:
@@ -27,6 +28,7 @@ def create_compute_environment(
         name_prefix="osm-h3-",
         type="MANAGED",
         state="ENABLED",
+        service_role=service_role_arn,
         compute_resources=aws.batch.ComputeEnvironmentComputeResourcesArgs(
             type="SPOT",
             allocation_strategy="SPOT_CAPACITY_OPTIMIZED",
@@ -71,6 +73,7 @@ def create_job_definition(
     image_uri: pulumi.Output[str],
     execution_role_arn: pulumi.Output[str],
     job_role_arn: pulumi.Output[str],
+    bucket_name: pulumi.Output[str],
     vcpus: int,
     memory: int,
     environment_vars: dict[str, str] | None = None,
@@ -81,7 +84,7 @@ def create_job_definition(
         env_list = [{"name": k, "value": v} for k, v in environment_vars.items()]
 
     container_properties = pulumi.Output.all(
-        image_uri, execution_role_arn, job_role_arn
+        image_uri, execution_role_arn, job_role_arn, bucket_name
     ).apply(
         lambda args: json.dumps(
             {
@@ -92,7 +95,7 @@ def create_job_definition(
                     {"type": "VCPU", "value": str(vcpus)},
                     {"type": "MEMORY", "value": str(memory)},
                 ],
-                "environment": env_list,
+                "environment": env_list + [{"name": "S3_BUCKET", "value": args[3]}],
                 "logConfiguration": {
                     "logDriver": "awslogs",
                     "options": {
@@ -142,19 +145,21 @@ def create_all_job_definitions(
     """Create job definitions for all pipeline stages."""
     job_definitions: dict[str, aws.batch.JobDefinition] = {}
 
-    # Common environment variables passed to all jobs
-    common_env = {
-        "AWS_REGION": region,
-        "PLANET_URL": planet_url,
+    # Map job config names to image names
+    # download, processor, merger all use the shared "batch" image
+    job_to_image = {
+        "download": "batch",
+        "sharder": "sharder",
+        "processor": "batch",
+        "merger": "batch",
+        "tiles": "tiles",
     }
 
-    # Map job config names to image names (they differ in some cases)
-    job_to_image = {
+    # Map job names to STAGE env var values (for the batch image)
+    job_to_stage = {
         "download": "download",
-        "sharder": "sharder",
-        "processor": "processor",
-        "merger": "merger",
-        "tiles": "tiles",
+        "processor": "process",
+        "merger": "merge",
     }
 
     for job_name, config in job_configs.items():
@@ -164,14 +169,25 @@ def create_all_job_definitions(
         if image_key not in image_uris:
             continue
 
+        # Build environment variables for this job
+        env_vars = {
+            "AWS_REGION": region,
+            "PLANET_URL": planet_url,
+        }
+
+        # Add STAGE for batch image jobs
+        if job_name in job_to_stage:
+            env_vars["STAGE"] = job_to_stage[job_name]
+
         job_def = create_job_definition(
             job_name=job_name,
             image_uri=image_uris[image_key],
             execution_role_arn=execution_role_arn,
             job_role_arn=job_role_arn,
+            bucket_name=bucket_name,
             vcpus=config["vcpus"],
             memory=config["memory"],
-            environment_vars=common_env,
+            environment_vars=env_vars,
         )
         job_definitions[job_name] = job_def
 
