@@ -81,6 +81,15 @@ def load_duckdb_extension(
         ) from e
 
 
+def parse_h3_index_to_uint64(h3_index: str) -> int:
+    value = h3_index.strip().lower()
+    if value.startswith("0x"):
+        return int(value, 16)
+    if any(c in "abcdef" for c in value):
+        return int(value, 16)
+    return int(value, 10)
+
+
 # ============================================================
 # Download Stage
 # ============================================================
@@ -229,10 +238,11 @@ def get_h3_bbox(h3_index: str) -> dict:
     load_duckdb_extension(conn, "h3", "INSTALL h3 FROM community")
     load_duckdb_extension(conn, "spatial", "INSTALL spatial")
 
-    result = conn.sql(
-        f"""
+    h3_uint64 = parse_h3_index_to_uint64(h3_index)
+    result = conn.execute(
+        """
         WITH boundary AS (
-            SELECT h3_cell_to_boundary_wkt('{h3_index}'::UBIGINT) as wkt
+            SELECT h3_cell_to_boundary_wkt(?::UBIGINT) as wkt
         )
         SELECT
             ST_XMin(ST_GeomFromText(wkt)) as west,
@@ -240,7 +250,8 @@ def get_h3_bbox(h3_index: str) -> dict:
             ST_XMax(ST_GeomFromText(wkt)) as east,
             ST_YMax(ST_GeomFromText(wkt)) as north
         FROM boundary
-    """
+    """,
+        [h3_uint64],
     ).fetchone()
 
     # Add 1% padding to avoid edge effects

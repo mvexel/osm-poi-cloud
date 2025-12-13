@@ -18,7 +18,16 @@ RUN pip3 install --no-cache-dir -r /app/requirements.txt
 # Pre-install DuckDB extensions into a shared directory (avoids network calls at runtime)
 ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 RUN mkdir -p "${DUCKDB_EXTENSION_DIRECTORY}" && \
-    python3 - <<'PY'\nimport os\nimport duckdb\n\nconn = duckdb.connect()\nconn.execute(f\"SET extension_directory='{os.environ['DUCKDB_EXTENSION_DIRECTORY']}'\")\nconn.execute(\"INSTALL spatial\")\nconn.execute(\"INSTALL h3 FROM community\")\nconn.close()\nPY
+    python3 - <<'PY'
+import os
+import duckdb
+
+conn = duckdb.connect()
+conn.execute(f"SET extension_directory='{os.environ['DUCKDB_EXTENSION_DIRECTORY']}'")
+conn.execute("INSTALL spatial")
+conn.execute("INSTALL h3 FROM community")
+conn.close()
+PY
 
 # Copy processing scripts
 COPY processor.py /app/processor.py
