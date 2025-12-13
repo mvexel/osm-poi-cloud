@@ -389,7 +389,7 @@ def process_to_parquet(
     h3_columns = []
     for res in range(h3_min, h3_max + 1):
         h3_columns.append(
-            "h3_cell_to_string(h3_latlng_to_cell(ST_Y(centroid)::DOUBLE, ST_X(centroid)::DOUBLE, "
+            "h3_cell_to_cell_string(h3_latlng_to_cell(ST_Y(centroid)::DOUBLE, ST_X(centroid)::DOUBLE, "
             f"{res})) as h3_r{res}"
         )
     h3_columns_sql = ",\n            ".join(h3_columns)
