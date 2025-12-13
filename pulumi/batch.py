@@ -97,7 +97,9 @@ def create_job_definition(
                     {"type": "VCPU", "value": str(vcpus)},
                     {"type": "MEMORY", "value": str(memory)},
                 ],
-                "environment": env_list + [{"name": "S3_BUCKET", "value": args[3]}],
+                "environment": env_list + [
+                    {"name": "S3_BUCKET", "value": args[3]}
+                ],
                 "logConfiguration": {
                     "logDriver": "awslogs",
                     "options": {

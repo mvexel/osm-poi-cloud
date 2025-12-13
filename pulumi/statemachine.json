@@ -1,7 +1,15 @@
 {
   "Comment": "Orchestrates the OSM-H3 AWS Batch pipeline",
-  "StartAt": "Run Download Job",
+  "StartAt": "Init",
   "States": {
+    "Init": {
+      "Type": "Pass",
+      "Parameters": {
+        "run_id.$": "$$.Execution.Name"
+      },
+      "ResultPath": "$",
+      "Next": "Run Download Job"
+    },
     "Run Download Job": {
       "Type": "Task",
       "Resource": "arn:aws:states:::batch:submitJob.sync",
@@ -14,6 +22,10 @@
             {
               "Name": "RUN_ID",
               "Value.$": "$.run_id"
+            },
+            {
+              "Name": "OUTPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
             }
           ]
         }
@@ -33,6 +45,14 @@
             {
               "Name": "RUN_ID",
               "Value.$": "$.run_id"
+            },
+            {
+              "Name": "INPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
+            },
+            {
+              "Name": "OUTPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
             }
           ]
         }
@@ -73,7 +93,15 @@
                 "Environment": [
                   {
                     "Name": "RUN_ID",
-                    "Value.$": "$$.Execution.Input.run_id"
+                    "Value.$": "$.run_id"
+                  },
+                  {
+                    "Name": "INPUT_PREFIX",
+                    "Value.$": "States.Format('/run/{}', $.run_id)"
+                  },
+                  {
+                    "Name": "OUTPUT_PREFIX",
+                    "Value.$": "States.Format('/run/{}', $.run_id)"
                   },
                   {
                     "Name": "SHARD_ID",
@@ -113,6 +141,14 @@
             {
               "Name": "RUN_ID",
               "Value.$": "$.run_id"
+            },
+            {
+              "Name": "INPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
+            },
+            {
+              "Name": "OUTPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
             }
           ]
         }
@@ -132,6 +168,14 @@
             {
               "Name": "RUN_ID",
               "Value.$": "$.run_id"
+            },
+            {
+              "Name": "INPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
+            },
+            {
+              "Name": "OUTPUT_PREFIX",
+              "Value.$": "States.Format('/run/{}', $.run_id)"
             }
           ]
         }

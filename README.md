@@ -176,15 +176,13 @@ pulumi stack output state_machine_arn
 # Generate a unique run ID (e.g., timestamp)
 RUN_ID="run-$(date +%Y%m%d-%H%M%S)"
 
-# Start the execution
+# Start the execution (execution name becomes the run_id)
 aws stepfunctions start-execution \
   --state-machine-arn $(pulumi stack output state_machine_arn) \
-  --name "$RUN_ID" \
-  --input "{\"run_id\": \"$RUN_ID\"}"
+  --name "$RUN_ID"
 ```
 
-**Required Input Parameters:**
-- `run_id`: Unique identifier for this pipeline run (used for S3 paths)
+**Note:** The execution name automatically becomes the `run_id` via the Init state. All pipeline stages will use `/run/{run_id}` as their S3 prefix for input and output files.
 
 **Optional Environment Variables (set in Pulumi config):**
 - `PLANET_URL`: OSM data source (default: configured in `pulumi/config.py`)
@@ -222,18 +220,19 @@ aws stepfunctions get-execution-history \
 
 The pipeline executes these stages sequentially:
 
-1. **Download Job**: Download planet.osm.pbf to S3
-2. **Shard Job**: Split PBF into H3-indexed shards
-3. **Get Manifest**: Lambda reads shard manifest from S3
-4. **Process Shards**: Map state runs up to 50 parallel Batch jobs per shard
-5. **Merge Job**: Combine all shard Parquet files
-6. **Tiles Job**: Generate PMTiles for visualization
+1. **Init**: Initializes execution state with `run_id` from execution name
+2. **Download Job**: Download planet.osm.pbf to S3 at `/run/{run_id}/planet.osm.pbf`
+3. **Shard Job**: Split PBF into quadtree tiles, outputs manifest to `/run/{run_id}/shards/manifest.json`
+4. **Get Manifest**: Lambda reads shard manifest from S3
+5. **Process Shards**: Map state runs up to 50 parallel Batch jobs per shard
+6. **Merge Job**: Combine all shard Parquet files into `/run/{run_id}/output/pois.parquet`
+7. **Tiles Job**: Generate PMTiles for visualization at `/run/{run_id}/tiles/pois.pmtiles`
 
-Each Batch job waits for the previous stage to complete before starting.
+Each stage receives `INPUT_PREFIX` and `OUTPUT_PREFIX` environment variables (both set to `/run/{run_id}`), ensuring all jobs use consistent paths without hardcoded assumptions.
 
 #### Restart From Processor Stage
 
-If `runs/<RUN_ID>/planet.osm.pbf` and `runs/<RUN_ID>/shards/manifest.json` already exist in S3, you can rerun only the **processor** jobs (and then **merge**/**tiles**) without rerunning download/sharding.
+If `/run/{RUN_ID}/planet.osm.pbf` and `/run/{RUN_ID}/shards/manifest.json` already exist in S3, you can rerun only the **processor** jobs (and then **merge**/**tiles**) without rerunning download/sharding.
 
 ```bash
 cd pulumi
@@ -247,16 +246,16 @@ MERGER_JOB_DEF_ARN="$(echo "$JOB_DEFS_JSON" | jq -r .merger)"
 TILES_JOB_DEF_ARN="$(echo "$JOB_DEFS_JSON" | jq -r .tiles)"
 
 # Rerun processor for shards that don't have output yet
-aws s3 cp "s3://$BUCKET/runs/$RUN_ID/shards/manifest.json" - | \
+aws s3 cp "s3://$BUCKET/run/$RUN_ID/shards/manifest.json" - | \
   jq -r '.features[].properties | "\(.shard_id) \(.z) \(.x) \(.y)"' | \
   while read -r SHARD_ID Z X Y; do
-    aws s3 ls "s3://$BUCKET/runs/$RUN_ID/shards/$SHARD_ID/data.parquet" >/dev/null 2>&1 && continue
-    aws s3 ls "s3://$BUCKET/runs/$RUN_ID/shards/$SHARD_ID/_EMPTY" >/dev/null 2>&1 && continue
+    aws s3 ls "s3://$BUCKET/run/$RUN_ID/shards/$SHARD_ID/data.parquet" >/dev/null 2>&1 && continue
+    aws s3 ls "s3://$BUCKET/run/$RUN_ID/shards/$SHARD_ID/_EMPTY" >/dev/null 2>&1 && continue
     aws batch submit-job \
       --job-name "osm-h3-process-$RUN_ID-$SHARD_ID" \
       --job-queue "$QUEUE" \
       --job-definition "$PROCESSOR_JOB_DEF_ARN" \
-      --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"},{\"name\":\"SHARD_ID\",\"value\":\"$SHARD_ID\"},{\"name\":\"SHARD_Z\",\"value\":\"$Z\"},{\"name\":\"SHARD_X\",\"value\":\"$X\"},{\"name\":\"SHARD_Y\",\"value\":\"$Y\"}]}"
+      --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"},{\"name\":\"INPUT_PREFIX\",\"value\":\"/run/$RUN_ID\"},{\"name\":\"OUTPUT_PREFIX\",\"value\":\"/run/$RUN_ID\"},{\"name\":\"SHARD_ID\",\"value\":\"$SHARD_ID\"},{\"name\":\"SHARD_Z\",\"value\":\"$Z\"},{\"name\":\"SHARD_X\",\"value\":\"$X\"},{\"name\":\"SHARD_Y\",\"value\":\"$Y\"}]}"
   done
 
 # After processor jobs complete, rerun merge + tiles
@@ -264,16 +263,16 @@ aws batch submit-job \
   --job-name "osm-h3-merge-$RUN_ID" \
   --job-queue "$QUEUE" \
   --job-definition "$MERGER_JOB_DEF_ARN" \
-  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"}]}"
+  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"},{\"name\":\"INPUT_PREFIX\",\"value\":\"/run/$RUN_ID\"},{\"name\":\"OUTPUT_PREFIX\",\"value\":\"/run/$RUN_ID\"}]}"
 
 aws batch submit-job \
   --job-name "osm-h3-tiles-$RUN_ID" \
   --job-queue "$QUEUE" \
   --job-definition "$TILES_JOB_DEF_ARN" \
-  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"}]}"
+  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"},{\"name\":\"OUTPUT_PREFIX\",\"value\":\"/run/$RUN_ID\"}]}"
 ```
 
-To force reprocessing of a shard, delete its existing output (`runs/<RUN_ID>/shards/<SHARD_ID>/data.parquet` or `runs/<RUN_ID>/shards/<SHARD_ID>/_EMPTY`) and resubmit that shard.
+To force reprocessing of a shard, delete its existing output (`/run/{RUN_ID}/shards/{SHARD_ID}/data.parquet` or `/run/{RUN_ID}/shards/{SHARD_ID}/_EMPTY`) and resubmit that shard.
 
 #### Check Job Logs
 
@@ -334,17 +333,33 @@ aws logs tail /aws/batch/osm-h3 --follow --filter-pattern "JOB_ID"
 
 ## Architecture
 
+### Pipeline Flow
+
 ```
-planet.pbf → [download] → S3
+planet.pbf → [download] → S3:/run/{run_id}/planet.osm.pbf
               ↓
-           [shard] → shards/*.pbf
+           [shard] → /run/{run_id}/shards/manifest.json
               ↓
-           [process] → parquet/*.parquet (parallel Batch jobs)
+           [process] → /run/{run_id}/shards/*/data.parquet (parallel Batch jobs)
               ↓
-           [merge] → merged.parquet → Athena table
+           [merge] → /run/{run_id}/output/pois.parquet + parquet/pois.parquet
               ↓
-           [tiles] → pois.pmtiles → CloudFront
+           [tiles] → /run/{run_id}/tiles/pois.pmtiles + tiles/pois.pmtiles
 ```
+
+### Design Principles
+
+**Single Source of Truth**: The Step Functions state machine defines all S3 paths via `INPUT_PREFIX` and `OUTPUT_PREFIX` environment variables. Jobs don't hardcode paths or make assumptions about directory structure.
+
+**Decoupled Components**: 
+- The Rust sharder binary has zero AWS dependencies - it reads a local PBF file and writes GeoJSON to stdout
+- The sharder's entrypoint shell script handles S3 I/O separately from the core logic
+- Python batch jobs use boto3 directly instead of a custom storage abstraction layer
+
+**Run Isolation**: Each pipeline execution is identified by a unique `run_id` (from the Step Functions execution name), and all artifacts are stored under `/run/{run_id}/`, making it easy to:
+- Run multiple pipelines concurrently
+- Inspect outputs from past runs
+- Restart failed runs without affecting others
 
 ## License
 

@@ -7,6 +7,8 @@ runs tippecanoe to generate PMTiles, and uploads to S3.
 
 Environment variables:
   - S3_BUCKET: S3 bucket name
+  - OUTPUT_PREFIX: S3 prefix for output files (e.g., /run/<run_id>)
+  - RUN_ID: Unique identifier for this pipeline run
   - PMTILES_OUTPUT: Output filename (default: pois.pmtiles)
 """
 
@@ -21,6 +23,8 @@ import boto3
 import pyarrow.parquet as pq
 
 S3_BUCKET = os.environ.get("S3_BUCKET")
+OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "").lstrip("/")
+RUN_ID = os.environ.get("RUN_ID")
 PMTILES_OUTPUT = os.environ.get("PMTILES_OUTPUT", "pois.pmtiles")
 
 
@@ -208,9 +212,16 @@ def main():
         pmtiles_path = work_dir / PMTILES_OUTPUT
         generate_pmtiles(geojson_path, pmtiles_path)
 
-        # Upload to S3
+        # Upload to S3 (both run-specific and latest locations)
         s3_key = f"tiles/{PMTILES_OUTPUT}"
         s3_uri = upload_pmtiles(pmtiles_path, S3_BUCKET, s3_key)
+        
+        # Also upload to run-specific output prefix if set
+        if OUTPUT_PREFIX:
+            run_specific_key = f"{OUTPUT_PREFIX}/tiles/{PMTILES_OUTPUT}"
+            print(f"Also uploading to run-specific location...")
+            upload_pmtiles(pmtiles_path, S3_BUCKET, run_specific_key)
+            print(f"  {run_specific_key}")
 
         print()
         print("=" * 50)

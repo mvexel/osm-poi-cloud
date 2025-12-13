@@ -30,9 +30,15 @@ conn.close()
 PY
 
 # Copy processing scripts
+COPY common.py /app/common.py
+COPY download.py /app/download.py
+COPY process.py /app/process.py
+COPY merge.py /app/merge.py
 COPY processor.py /app/processor.py
 
 WORKDIR /app
 
-# Default entrypoint - uses STAGE env var to determine behavior
+# Default entrypoint
+# For backward compatibility, processor.py dispatches to the individual scripts
+# You can also invoke the scripts directly: python3 /app/download.py, etc.
 ENTRYPOINT ["python3", "/app/processor.py"]
