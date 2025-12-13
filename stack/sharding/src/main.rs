@@ -1,5 +1,4 @@
 use anyhow::{bail, Context, Result};
-use aws_sdk_s3::primitives::ByteStream;
 use clap::Parser;
 use hashbrown::HashMap;
 use osmpbf::{Element, ElementReader};
@@ -9,27 +8,23 @@ use std::path::{Path, PathBuf};
 
 /// CLI parameters - all can be set via environment variables.
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Shard an OSM planet file into quadtree tiles")]
+#[command(
+    author,
+    version,
+    about = "Shard an OSM planet file into quadtree tiles"
+)]
 struct Args {
     /// Path to the .osm.pbf file to scan.
     #[arg(env = "OSM_FILE")]
     osm_file: PathBuf,
 
-    /// Highest Web Mercator zoom level to consider when splitting tiles.
-    #[arg(env = "MAX_ZOOM", default_value = "14")]
+    /// Highest Web Mercator zoom level to consider when splitting tiles. optional, default is 20.
+    #[arg(short, long, env = "MAX_ZOOM", default_value = "20")]
     max_zoom: u8,
 
     /// Maximum number of nodes allowed per shard before splitting.
-    #[arg(env = "MAX_NODES_PER_SHARD", default_value = "1000000")]
+    #[arg(short, long, env = "MAX_NODES_PER_SHARD", default_value = "1000000")]
     max_nodes: u64,
-
-    /// S3 bucket to write the manifest to (optional - if not set, writes to stdout).
-    #[arg(long, env = "S3_BUCKET")]
-    s3_bucket: Option<String>,
-
-    /// Run ID for organizing outputs in S3.
-    #[arg(long, env = "RUN_ID")]
-    run_id: Option<String>,
 }
 
 /// Aggregated counts for every resolution plus the total number of nodes we saw.
@@ -108,26 +103,15 @@ async fn main() -> Result<()> {
     let shards = build_shards(&scan.counts, args.max_zoom, args.max_nodes);
     eprintln!("Generated {} shards.", shards.len());
 
-    // Generate GeoJSON
+    // Generate GeoJSON, print to stdout.
     let geojson = generate_geojson(&shards)?;
-
-    // Output to S3 or stdout
-    if let (Some(bucket), Some(run_id)) = (&args.s3_bucket, &args.run_id) {
-        eprintln!("Uploading manifest to S3...");
-        upload_to_s3(&geojson, bucket, run_id).await?;
-        eprintln!(
-            "Manifest uploaded to s3://{}/runs/{}/shards/manifest.json",
-            bucket, run_id
-        );
-    } else {
-        eprintln!("Writing GeoJSON to stdout...");
-        println!("{}", geojson);
-    }
+    eprintln!("Writing GeoJSON to stdout...");
+    println!("{}", geojson);
 
     Ok(())
 }
 
-/// Stream the PBF in parallel, map every node to its H3 cell, and keep tallies for each resolution.
+/// Stream the PBF in parallel, map every node to its ZXY cell, and keep tallies for each zoom level.
 fn scan_osm(path: &Path, max_zoom: u8) -> Result<ScanResult> {
     let reader = ElementReader::from_path(path)
         .with_context(|| format!("unable to open {}", path.display()))?;
@@ -191,11 +175,7 @@ fn scan_osm(path: &Path, max_zoom: u8) -> Result<ScanResult> {
 }
 
 /// Translate the hierarchical counts into the final set of shards.
-fn build_shards(
-    counts: &[HashMap<(u32, u32), u64>],
-    max_zoom: u8,
-    max_nodes: u64,
-) -> Vec<Shard> {
+fn build_shards(counts: &[HashMap<(u32, u32), u64>], max_zoom: u8, max_nodes: u64) -> Vec<Shard> {
     let mut shards = Vec::new();
     let mut oversized = Vec::new();
 
@@ -291,14 +271,7 @@ fn subdivide(
             continue;
         }
         subdivide(
-            child_zoom,
-            cx,
-            cy,
-            counts,
-            max_zoom,
-            max_nodes,
-            shards,
-            oversized,
+            child_zoom, cx, cy, counts, max_zoom, max_nodes, shards, oversized,
         );
     }
 }
@@ -334,26 +307,7 @@ fn generate_geojson(shards: &[Shard]) -> Result<String> {
     Ok(serde_json::to_string_pretty(&collection)?)
 }
 
-/// Upload the GeoJSON manifest to S3.
-async fn upload_to_s3(content: &str, bucket: &str, run_id: &str) -> Result<()> {
-    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-    let client = aws_sdk_s3::Client::new(&config);
-
-    let key = format!("runs/{}/shards/manifest.json", run_id);
-
-    client
-        .put_object()
-        .bucket(bucket)
-        .key(&key)
-        .body(ByteStream::from(content.as_bytes().to_vec()))
-        .content_type("application/json")
-        .send()
-        .await
-        .context("failed to upload manifest to S3")?;
-
-    Ok(())
-}
-
+// Web Mercator tile utilities
 fn lon_lat_to_tile(lon: f64, lat: f64, zoom: u8) -> Option<(u32, u32)> {
     if !(lon.is_finite() && lat.is_finite()) {
         return None;
@@ -361,15 +315,18 @@ fn lon_lat_to_tile(lon: f64, lat: f64, zoom: u8) -> Option<(u32, u32)> {
 
     // Clamp latitude to the Web Mercator limit.
     let lat = lat.clamp(-85.05112878, 85.05112878);
+    // Number of tiles at this zoom level.
     let n = 2u32.checked_pow(u32::from(zoom))?;
 
+    // Calculate tile X and Y.
     let x = ((lon + 180.0) / 360.0 * f64::from(n)).floor();
     let lat_rad = lat.to_radians();
-    let y = ((1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / PI) / 2.0 * f64::from(n))
-        .floor();
+    let y = ((1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / PI) / 2.0 * f64::from(n)).floor();
 
     let x = x.clamp(0.0, f64::from(n - 1)) as u32;
     let y = y.clamp(0.0, f64::from(n - 1)) as u32;
+
+    // Return tile coordinates.
     Some((x, y))
 }
 
