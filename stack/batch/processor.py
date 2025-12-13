@@ -40,7 +40,10 @@ RUN_ID = os.environ.get("RUN_ID")
 S3_BUCKET = os.environ.get("S3_BUCKET")
 SHARD_H3_INDEX = os.environ.get("SHARD_H3_INDEX")
 SHARD_RESOLUTION = os.environ.get("SHARD_RESOLUTION")
-PLANET_URL = os.environ.get("PLANET_URL") or "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
+PLANET_URL = (
+    os.environ.get("PLANET_URL")
+    or "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
+)
 
 
 def require_env(*names: str) -> None:
@@ -51,9 +54,37 @@ def require_env(*names: str) -> None:
         sys.exit(1)
 
 
+def configure_duckdb_extensions(conn: duckdb.DuckDBPyConnection) -> None:
+    extension_directory = os.environ.get("DUCKDB_EXTENSION_DIRECTORY")
+    if extension_directory:
+        conn.execute(f"SET extension_directory='{extension_directory}'")
+
+
+def load_duckdb_extension(
+    conn: duckdb.DuckDBPyConnection, name: str, install_sql: str
+) -> None:
+    configure_duckdb_extensions(conn)
+    try:
+        conn.execute(f"LOAD {name}")
+        return
+    except Exception:
+        pass
+
+    try:
+        conn.execute(install_sql)
+        conn.execute(f"LOAD {name}")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load DuckDB extension '{name}'. If running in a network-restricted "
+            f"environment, pre-bundle extensions in the container and set DUCKDB_EXTENSION_DIRECTORY. "
+            f"Original error: {e}"
+        ) from e
+
+
 # ============================================================
 # Download Stage
 # ============================================================
+
 
 def stage_download() -> None:
     """Download planet.osm.pbf from OSM mirrors."""
@@ -80,8 +111,10 @@ def stage_download() -> None:
                     "--max-connection-per-server=4",
                     "--split=4",
                     "--min-split-size=100M",
-                    "--dir", str(work_dir),
-                    "--out", "planet.osm.pbf",
+                    "--dir",
+                    str(work_dir),
+                    "--out",
+                    "planet.osm.pbf",
                     PLANET_URL,
                 ],
                 check=True,
@@ -93,7 +126,7 @@ def stage_download() -> None:
                 check=True,
             )
 
-        size_gb = planet_path.stat().st_size / (1024 ** 3)
+        size_gb = planet_path.stat().st_size / (1024**3)
         print(f"Downloaded {size_gb:.1f} GB")
 
         # Upload to S3
@@ -115,6 +148,7 @@ def stage_download() -> None:
 # ============================================================
 # Process Stage (per-shard)
 # ============================================================
+
 
 def stage_process() -> None:
     """Process a single H3 shard to Parquet."""
@@ -149,10 +183,13 @@ def stage_process() -> None:
             [
                 "osmium",
                 "extract",
-                "--bbox", f"{bbox['west']},{bbox['south']},{bbox['east']},{bbox['north']}",
-                "--strategy", "smart",
+                "--bbox",
+                f"{bbox['west']},{bbox['south']},{bbox['east']},{bbox['north']}",
+                "--strategy",
+                "smart",
                 str(planet_path),
-                "-o", str(filtered_pbf),
+                "-o",
+                str(filtered_pbf),
             ],
             check=True,
         )
@@ -189,9 +226,11 @@ def get_h3_bbox(h3_index: str) -> dict:
     """Get bounding box for an H3 cell with some padding."""
     # Use DuckDB's H3 extension to get the boundary
     conn = duckdb.connect()
-    conn.sql("INSTALL h3 FROM community; LOAD h3;")
+    load_duckdb_extension(conn, "h3", "INSTALL h3 FROM community")
+    load_duckdb_extension(conn, "spatial", "INSTALL spatial")
 
-    result = conn.sql(f"""
+    result = conn.sql(
+        f"""
         WITH boundary AS (
             SELECT h3_cell_to_boundary_wkt('{h3_index}'::UBIGINT) as wkt
         )
@@ -201,7 +240,8 @@ def get_h3_bbox(h3_index: str) -> dict:
             ST_XMax(ST_GeomFromText(wkt)) as east,
             ST_YMax(ST_GeomFromText(wkt)) as north
         FROM boundary
-    """).fetchone()
+    """
+    ).fetchone()
 
     # Add 1% padding to avoid edge effects
     west, south, east, north = result
@@ -225,10 +265,12 @@ def filter_to_pois(input_pbf: Path, output_dir: Path) -> Path:
     named_pbf = output_dir / "named.osm.pbf"
     subprocess.run(
         [
-            "osmium", "tags-filter",
+            "osmium",
+            "tags-filter",
             str(input_pbf),
             "nw/name",
-            "-o", str(named_pbf),
+            "-o",
+            str(named_pbf),
         ],
         check=True,
     )
@@ -236,12 +278,23 @@ def filter_to_pois(input_pbf: Path, output_dir: Path) -> Path:
     # Second pass: filter to POI categories
     subprocess.run(
         [
-            "osmium", "tags-filter",
+            "osmium",
+            "tags-filter",
             str(named_pbf),
-            "nw/amenity", "nw/shop", "nw/leisure", "nw/tourism",
-            "nw/office", "nw/healthcare", "nw/railway", "nw/aeroway",
-            "nw/historic", "nw/man_made", "nw/natural", "nw/public_transport",
-            "-o", str(output_path),
+            "nw/amenity",
+            "nw/shop",
+            "nw/leisure",
+            "nw/tourism",
+            "nw/office",
+            "nw/healthcare",
+            "nw/railway",
+            "nw/aeroway",
+            "nw/historic",
+            "nw/man_made",
+            "nw/natural",
+            "nw/public_transport",
+            "-o",
+            str(output_path),
         ],
         check=True,
     )
@@ -257,12 +310,17 @@ def pbf_to_geojson(pbf_path: Path, output_dir: Path) -> Path:
 
     subprocess.run(
         [
-            "osmium", "export",
+            "osmium",
+            "export",
             str(pbf_path),
-            "-o", str(output_path),
-            "-f", "geojsonseq",
-            "-x", "print_record_separator=false",
-            "-u", "type_id",
+            "-o",
+            str(output_path),
+            "-f",
+            "geojsonseq",
+            "-x",
+            "print_record_separator=false",
+            "-u",
+            "type_id",
             "--geometry-types=point,polygon",
         ],
         check=True,
@@ -272,20 +330,24 @@ def pbf_to_geojson(pbf_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
-def process_to_parquet(geojson_path: Path, shard_id: str, output_dir: Path) -> Path | None:
+def process_to_parquet(
+    geojson_path: Path, shard_id: str, output_dir: Path
+) -> Path | None:
     """Process GeoJSON to Parquet with POI classification."""
     output_path = output_dir / "data.parquet"
 
     conn = duckdb.connect()
-    conn.sql("LOAD spatial;")
+    load_duckdb_extension(conn, "spatial", "INSTALL spatial")
 
     # Check if there's any data
-    count = conn.sql(f"""
+    count = conn.sql(
+        f"""
         SELECT COUNT(*) FROM read_json('{geojson_path}',
             columns={{id: 'VARCHAR', type: 'VARCHAR', geometry: 'JSON', properties: 'JSON'}},
             maximum_object_size=10485760
         )
-    """).fetchone()[0]
+    """
+    ).fetchone()[0]
 
     if count == 0:
         print("No features found")
@@ -414,10 +476,12 @@ def process_to_parquet(geojson_path: Path, shard_id: str, output_dir: Path) -> P
     conn.sql(query)
 
     # Get stats
-    stats = conn.sql(f"""
+    stats = conn.sql(
+        f"""
         SELECT COUNT(*) as total, COUNT(DISTINCT class) as classes
         FROM read_parquet('{output_path}')
-    """).fetchone()
+    """
+    ).fetchone()
 
     print(f"Output: {stats[0]:,} POIs in {stats[1]} classes")
     print(f"File size: {output_path.stat().st_size / (1024**2):.1f} MB")
@@ -429,6 +493,7 @@ def process_to_parquet(geojson_path: Path, shard_id: str, output_dir: Path) -> P
 # ============================================================
 # Merge Stage
 # ============================================================
+
 
 def stage_merge() -> None:
     """Combine all shard outputs into final dataset."""
@@ -478,22 +543,28 @@ def stage_merge() -> None:
         conn = duckdb.connect()
 
         output_path = work_dir / "pois.parquet"
-        conn.sql(f"""
+        conn.sql(
+            f"""
             COPY (
                 SELECT * FROM read_parquet('{shards_dir}/*.parquet')
             ) TO '{output_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
-        """)
+        """
+        )
 
         # Get final stats
-        stats = conn.sql(f"""
+        stats = conn.sql(
+            f"""
             SELECT
                 COUNT(*) as total,
                 COUNT(DISTINCT class) as classes,
                 COUNT(DISTINCT shard_id) as shards
             FROM read_parquet('{output_path}')
-        """).fetchone()
+        """
+        ).fetchone()
 
-        print(f"Merged output: {stats[0]:,} POIs, {stats[1]} classes, {stats[2]} shards")
+        print(
+            f"Merged output: {stats[0]:,} POIs, {stats[1]} classes, {stats[2]} shards"
+        )
         print(f"File size: {output_path.stat().st_size / (1024**2):.1f} MB")
 
         # Upload final output
@@ -517,6 +588,7 @@ def stage_merge() -> None:
 # ============================================================
 # Main
 # ============================================================
+
 
 def main() -> None:
     print(f"OSM-H3 Processor - Stage: {STAGE}")

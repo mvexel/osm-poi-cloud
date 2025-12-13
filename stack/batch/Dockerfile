@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
-# Pre-install DuckDB extensions (avoids network calls at runtime)
-RUN python3 -c "import duckdb; conn = duckdb.connect(); conn.sql('INSTALL spatial'); conn.sql('INSTALL h3 FROM community')"
+# Pre-install DuckDB extensions into a shared directory (avoids network calls at runtime)
+ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
+RUN mkdir -p "${DUCKDB_EXTENSION_DIRECTORY}" && \
+    python3 - <<'PY'\nimport os\nimport duckdb\n\nconn = duckdb.connect()\nconn.execute(f\"SET extension_directory='{os.environ['DUCKDB_EXTENSION_DIRECTORY']}'\")\nconn.execute(\"INSTALL spatial\")\nconn.execute(\"INSTALL h3 FROM community\")\nconn.close()\nPY
 
 # Copy processing scripts
 COPY processor.py /app/processor.py
