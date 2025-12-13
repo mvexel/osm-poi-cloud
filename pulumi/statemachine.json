@@ -18,6 +18,7 @@
           ]
         }
       },
+      "ResultPath": "$.download_job_output",
       "Next": "Run Shard Job"
     },
     "Run Shard Job": {
@@ -26,7 +27,7 @@
       "Parameters": {
         "JobName.$": "States.Format('osm-h3-shard-{}', $$.Execution.Name)",
         "JobQueue": "${JobQueueArn}",
-        "JobDefinition": "${ShardJobDefArn}",
+        "JobDefinition": "${SharderJobDefArn}",
         "ContainerOverrides": {
           "Environment": [
             {
@@ -43,7 +44,7 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",
       "Parameters": {
-        "FunctionName": "${GetManifestLambdaArn}",
+        "FunctionName": "${GetManifestJobDefArn}",
         "Payload": {
           "run_id.$": "$.run_id"
         }
@@ -67,7 +68,7 @@
             "Parameters": {
               "JobName.$": "States.Format('osm-h3-process-{}-{}', $$.Execution.Name, $.h3_index)",
               "JobQueue": "${JobQueueArn}",
-              "JobDefinition": "${ProcessJobDefArn}",
+              "JobDefinition": "${ProcessorJobDefArn}",
               "ContainerOverrides": {
                 "Environment": [
                   {
@@ -98,7 +99,7 @@
       "Parameters": {
         "JobName.$": "States.Format('osm-h3-merge-{}', $$.Execution.Name)",
         "JobQueue": "${JobQueueArn}",
-        "JobDefinition": "${MergeJobDefArn}",
+        "JobDefinition": "${MergerJobDefArn}",
         "ContainerOverrides": {
           "Environment": [
             {
@@ -108,6 +109,7 @@
           ]
         }
       },
+      "ResultPath": "$.merge_job_output",
       "Next": "Run Tiles Job"
     },
     "Run Tiles Job": {
