@@ -1,24 +1,28 @@
 # OSM-H3 Batch Processor
 # Multi-stage processor for download, shard processing, and merge
 
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.8.0
+FROM python:3.13-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     osmium-tool \
     curl \
     aria2 \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# copy UV and app code
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY . /app
+WORKDIR /app
+
 # Install Python dependencies
-COPY requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
+ENV UV_NO_DEV=1
+RUN uv sync --locked
 
 # Pre-install DuckDB extensions into a shared directory (avoids network calls at runtime)
 ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 RUN mkdir -p "${DUCKDB_EXTENSION_DIRECTORY}" && \
-    python3 - <<'PY'
+    uv run python3 - <<'PY'
 import os
 import duckdb
 
@@ -29,14 +33,6 @@ conn.execute("INSTALL h3 FROM community")
 conn.close()
 PY
 
-# Copy processing scripts
-COPY common.py /app/common.py
-COPY download.py /app/download.py
-COPY process.py /app/process.py
-COPY merge.py /app/merge.py
-COPY processor.py /app/processor.py
-
-WORKDIR /app
 
 # Default entrypoint
 # For backward compatibility, processor.py dispatches to the individual scripts

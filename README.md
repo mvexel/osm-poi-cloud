@@ -2,37 +2,19 @@
 
 A scalable AWS Batch-based pipeline for processing OpenStreetMap data into H3-indexed POIs, stored in Parquet format and served via PMTiles.
 
-## Quick Start
-
-```bash
-# Deploy infrastructure
-cd pulumi
-pulumi up
-
-# Run the pipeline
-./pipeline_cli.py run
-
-# Monitor progress
-./pipeline_cli.py status --watch
-```
-
 ## Pulumi Deployment Guide
 
 ### Prerequisites
 
 - [Pulumi CLI](https://www.pulumi.com/docs/get-started/install/) installed
 - AWS credentials configured (`aws configure` or environment variables)
-- Python 3.11+ with `uv` or `pip`
+- Python 3.13+ with `uv` (see Local Development Setup above)
 
 ### Initial Setup
 
 ```bash
-# Install Python dependencies
-cd pulumi
-uv pip install -r requirements.txt
-
-# Login to Pulumi (local state or cloud)
-pulumi login --local  # or just `pulumi login` for Pulumi Cloud
+# Login to Pulumi
+pulumi login --local  
 
 # Initialize stack (use 'dev', 'prod', etc.)
 pulumi stack init dev
@@ -51,9 +33,6 @@ pulumi preview
 
 # Deploy everything (ECR, S3, Batch compute, job definitions, Athena, API Gateway, CloudFront)
 pulumi up
-
-# Deploy non-interactively
-pulumi up --yes
 ```
 
 The deployment creates:

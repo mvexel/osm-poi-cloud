@@ -13,8 +13,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", extras = ["s3"], specifier = ">=1.42.9" },
-    { name = "duckdb", specifier = ">=1.4.3" },
+    { name = "boto3", specifier = "==1.42.9" },
+    { name = "duckdb", specifier = "==1.4.3" },
 ]
 
 [[package]]
