@@ -14,6 +14,8 @@ from config import (
     job_configs,
     region,
     planet_url,
+    max_zoom,
+    max_nodes_per_shard,
 )
 
 
@@ -174,6 +176,13 @@ def create_all_job_definitions(
             "AWS_REGION": region,
             "PLANET_URL": planet_url,
         }
+
+        # Sharder configuration (optional; if omitted, sharder binary defaults apply)
+        if job_name == "sharder":
+            if max_zoom is not None:
+                env_vars["MAX_ZOOM"] = str(max_zoom)
+            if max_nodes_per_shard is not None:
+                env_vars["MAX_NODES_PER_SHARD"] = str(max_nodes_per_shard)
 
         # Add STAGE for batch image jobs
         if job_name in job_to_stage:

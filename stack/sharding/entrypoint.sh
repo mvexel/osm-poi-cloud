@@ -4,16 +4,16 @@ set -euo pipefail
 # Environment variables:
 # - RUN_ID: Pipeline run identifier
 # - S3_BUCKET: S3 bucket for input/output
-# - MAX_RESOLUTION: H3 resolution (default: 7)
-# - MAX_NODES_PER_SHARD: Max nodes per shard (default: 5000000)
+# - MAX_ZOOM: Max Web Mercator zoom (optional; defaults handled by the sharder binary)
+# - MAX_NODES_PER_SHARD: Max nodes per shard (optional; defaults handled by the sharder binary)
 
 echo "========================================"
 echo "OSM-H3 Sharder"
 echo "========================================"
 echo "Run ID: ${RUN_ID:-not set}"
 echo "S3 Bucket: ${S3_BUCKET:-not set}"
-echo "Max Resolution: ${MAX_RESOLUTION:-7}"
-echo "Max Nodes Per Shard: ${MAX_NODES_PER_SHARD:-5000000}"
+echo "Max Zoom (MAX_ZOOM): ${MAX_ZOOM:-<unset>}"
+echo "Max Nodes Per Shard (MAX_NODES_PER_SHARD): ${MAX_NODES_PER_SHARD:-<unset>}"
 echo ""
 
 # Validate required env vars
@@ -47,8 +47,6 @@ echo ""
 echo "Running sharder..."
 osm-planet-sharding \
     "${PLANET_PATH}" \
-    "${MAX_RESOLUTION:-7}" \
-    "${MAX_NODES_PER_SHARD:-5000000}" \
     --s3-bucket "${S3_BUCKET}" \
     --run-id "${RUN_ID}"
 

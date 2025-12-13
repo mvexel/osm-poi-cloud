@@ -13,8 +13,10 @@ Environment variables:
   - S3_BUCKET: S3 bucket for input/output
 
 For 'process' stage:
-  - SHARD_H3_INDEX: H3 cell index to process
-  - SHARD_RESOLUTION: H3 resolution of the shard
+  - SHARD_ID: Shard identifier (e.g. "10-512-384")
+  - SHARD_Z: Web Mercator tile zoom
+  - SHARD_X: Web Mercator tile x
+  - SHARD_Y: Web Mercator tile y
 
 For 'download' stage:
   - PLANET_URL: Optional custom URL for planet file
@@ -38,8 +40,13 @@ import duckdb
 STAGE = os.environ.get("STAGE", "process")
 RUN_ID = os.environ.get("RUN_ID")
 S3_BUCKET = os.environ.get("S3_BUCKET")
-SHARD_H3_INDEX = os.environ.get("SHARD_H3_INDEX")
-SHARD_RESOLUTION = os.environ.get("SHARD_RESOLUTION")
+SHARD_ID = os.environ.get("SHARD_ID")
+SHARD_Z = os.environ.get("SHARD_Z")
+SHARD_X = os.environ.get("SHARD_X")
+SHARD_Y = os.environ.get("SHARD_Y")
+
+H3_MIN_RESOLUTION = os.environ.get("H3_MIN_RESOLUTION")
+H3_MAX_RESOLUTION = os.environ.get("H3_MAX_RESOLUTION")
 PLANET_URL = (
     os.environ.get("PLANET_URL")
     or "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
@@ -88,6 +95,23 @@ def parse_h3_index_to_uint64(h3_index: str) -> int:
     if any(c in "abcdef" for c in value):
         return int(value, 16)
     return int(value, 10)
+
+
+def get_tile_bbox(z: int, x: int, y: int) -> dict:
+    import math
+
+    n = 2**z
+    west = x / n * 360.0 - 180.0
+    east = (x + 1) / n * 360.0 - 180.0
+
+    def tile_y_to_lat_deg(tile_y: int) -> float:
+        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * tile_y / n)))
+        return lat_rad * 180.0 / math.pi
+
+    north = tile_y_to_lat_deg(y)
+    south = tile_y_to_lat_deg(y + 1)
+
+    return {"west": west, "south": south, "east": east, "north": north}
 
 
 # ============================================================
@@ -160,14 +184,14 @@ def stage_download() -> None:
 
 
 def stage_process() -> None:
-    """Process a single H3 shard to Parquet."""
-    require_env("RUN_ID", "S3_BUCKET", "SHARD_H3_INDEX", "SHARD_RESOLUTION")
+    """Process a single tile shard to Parquet."""
+    require_env("RUN_ID", "S3_BUCKET", "SHARD_ID", "SHARD_Z", "SHARD_X", "SHARD_Y")
 
     print("=" * 60)
     print("PROCESS STAGE")
     print("=" * 60)
     print(f"Run ID: {RUN_ID}")
-    print(f"Shard: {SHARD_H3_INDEX} (resolution {SHARD_RESOLUTION})")
+    print(f"Shard: {SHARD_ID} (z/x/y {SHARD_Z}/{SHARD_X}/{SHARD_Y})")
     print()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -181,8 +205,8 @@ def stage_process() -> None:
         s3.download_file(S3_BUCKET, planet_key, str(planet_path))
         print(f"Downloaded {planet_path.stat().st_size / (1024**3):.1f} GB")
 
-        # Get H3 cell bounding box for filtering
-        bbox = get_h3_bbox(SHARD_H3_INDEX)
+        # Get tile bounding box for filtering
+        bbox = get_tile_bbox(int(SHARD_Z), int(SHARD_X), int(SHARD_Y))
         print(f"Bounding box: {bbox}")
 
         # Filter PBF to this H3 cell's bounding box
@@ -215,17 +239,17 @@ def stage_process() -> None:
         poi_pbf.unlink()
 
         # Process to Parquet with DuckDB
-        parquet_path = process_to_parquet(geojson_path, SHARD_H3_INDEX, work_dir)
+        parquet_path = process_to_parquet(geojson_path, SHARD_ID, work_dir)
 
         if parquet_path is None:
             print("No POIs found in this shard, skipping upload")
             # Write empty marker so merge knows this shard was processed
-            marker_key = f"runs/{RUN_ID}/shards/{SHARD_H3_INDEX}/_EMPTY"
+            marker_key = f"runs/{RUN_ID}/shards/{SHARD_ID}/_EMPTY"
             s3.put_object(Bucket=S3_BUCKET, Key=marker_key, Body=b"")
             return
 
         # Upload to S3
-        s3_key = f"runs/{RUN_ID}/shards/{SHARD_H3_INDEX}/data.parquet"
+        s3_key = f"runs/{RUN_ID}/shards/{SHARD_ID}/data.parquet"
         print(f"Uploading to s3://{S3_BUCKET}/{s3_key}...")
         s3.upload_file(str(parquet_path), S3_BUCKET, s3_key)
         print("Done!")
@@ -349,6 +373,26 @@ def process_to_parquet(
 
     conn = duckdb.connect()
     load_duckdb_extension(conn, "spatial", "INSTALL spatial")
+    load_duckdb_extension(conn, "h3", "INSTALL h3 FROM community")
+
+    try:
+        h3_min = int(H3_MIN_RESOLUTION) if H3_MIN_RESOLUTION is not None else 3
+        h3_max = int(H3_MAX_RESOLUTION) if H3_MAX_RESOLUTION is not None else 9
+    except ValueError:
+        raise ValueError("H3_MIN_RESOLUTION and H3_MAX_RESOLUTION must be integers")
+
+    h3_min = max(0, min(15, h3_min))
+    h3_max = max(0, min(15, h3_max))
+    if h3_min > h3_max:
+        h3_min, h3_max = h3_max, h3_min
+
+    h3_columns = []
+    for res in range(h3_min, h3_max + 1):
+        h3_columns.append(
+            "h3_cell_to_string(h3_latlng_to_cell(ST_Y(centroid)::DOUBLE, ST_X(centroid)::DOUBLE, "
+            f"{res})) as h3_r{res}"
+        )
+    h3_columns_sql = ",\n            ".join(h3_columns)
 
     # Check if there's any data
     count = conn.sql(
@@ -468,6 +512,7 @@ def process_to_parquet(
             class,
             ST_X(centroid)::DOUBLE as lon,
             ST_Y(centroid)::DOUBLE as lat,
+            {h3_columns_sql},
             '{shard_id}' as shard_id,
             amenity,
             shop,

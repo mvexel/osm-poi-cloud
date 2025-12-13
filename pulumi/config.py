@@ -33,6 +33,10 @@ planet_url = (
     or "https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf"
 )
 
+# Sharding configuration (optional; defaults are in the sharder binary)
+max_zoom = config.get_int("max_zoom")
+max_nodes_per_shard = config.get_int("max_nodes_per_shard")
+
 # Feature flags
 enable_cloudfront = (
     config.get_bool("enable_cloudfront") or False

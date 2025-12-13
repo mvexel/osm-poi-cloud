@@ -1,26 +1,26 @@
 use anyhow::{bail, Context, Result};
 use aws_sdk_s3::primitives::ByteStream;
 use clap::Parser;
-use h3o::{CellIndex, LatLng, Resolution};
 use hashbrown::HashMap;
 use osmpbf::{Element, ElementReader};
 use serde::Serialize;
+use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
 
 /// CLI parameters - all can be set via environment variables.
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Shard an OSM planet file into H3 cells")]
+#[command(author, version, about = "Shard an OSM planet file into quadtree tiles")]
 struct Args {
     /// Path to the .osm.pbf file to scan.
     #[arg(env = "OSM_FILE")]
     osm_file: PathBuf,
 
-    /// Highest H3 resolution to use when binning nodes (0-15).
-    #[arg(env = "MAX_RESOLUTION", default_value = "7")]
-    max_resolution: u8,
+    /// Highest Web Mercator zoom level to consider when splitting tiles.
+    #[arg(env = "MAX_ZOOM", default_value = "14")]
+    max_zoom: u8,
 
     /// Maximum number of nodes allowed per shard before splitting.
-    #[arg(env = "MAX_NODES_PER_SHARD", default_value = "5000000")]
+    #[arg(env = "MAX_NODES_PER_SHARD", default_value = "1000000")]
     max_nodes: u64,
 
     /// S3 bucket to write the manifest to (optional - if not set, writes to stdout).
@@ -34,14 +34,16 @@ struct Args {
 
 /// Aggregated counts for every resolution plus the total number of nodes we saw.
 struct ScanResult {
-    counts: Vec<HashMap<CellIndex, u64>>,
+    counts: Vec<HashMap<(u32, u32), u64>>,
     node_total: u64,
 }
 
 /// One shard entry combining the cell index with its aggregated count.
 #[derive(Clone, Copy)]
 struct Shard {
-    cell: CellIndex,
+    zoom: u8,
+    x: u32,
+    y: u32,
     node_count: u64,
 }
 
@@ -65,8 +67,10 @@ struct Feature {
 /// Properties exposed for each shard.
 #[derive(Serialize)]
 struct Properties {
-    h3_index: String,
-    resolution: u8,
+    shard_id: String,
+    z: u8,
+    x: u32,
+    y: u32,
     node_count: u64,
 }
 
@@ -85,27 +89,23 @@ async fn main() -> Result<()> {
         bail!("file does not exist: {}", args.osm_file.display());
     }
 
-    // Convert the requested resolution to the strongly typed enum and validate range.
-    let max_resolution = Resolution::try_from(args.max_resolution)
-        .context("max_resolution must be between 0 and 15")?;
-
     eprintln!(
-        "Scanning {} at resolution {}...",
+        "Scanning {} (max zoom = {})...",
         args.osm_file.display(),
-        args.max_resolution
+        args.max_zoom
     );
-    let scan = scan_osm(&args.osm_file, max_resolution)?;
+    let scan = scan_osm(&args.osm_file, args.max_zoom)?;
     eprintln!(
-        "Scan complete.  {} nodes in {} populated max-resolution cells.",
+        "Scan complete.  {} nodes in {} populated max-zoom tiles.",
         scan.node_total,
-        scan.counts[resolution_index(max_resolution)].len()
+        scan.counts[usize::from(args.max_zoom)].len()
     );
 
     eprintln!(
         "Building shards (max nodes per shard = {})...",
         args.max_nodes
     );
-    let shards = build_shards(&scan.counts, max_resolution, args.max_nodes);
+    let shards = build_shards(&scan.counts, args.max_zoom, args.max_nodes);
     eprintln!("Generated {} shards.", shards.len());
 
     // Generate GeoJSON
@@ -128,43 +128,41 @@ async fn main() -> Result<()> {
 }
 
 /// Stream the PBF in parallel, map every node to its H3 cell, and keep tallies for each resolution.
-fn scan_osm(path: &Path, max_resolution: Resolution) -> Result<ScanResult> {
+fn scan_osm(path: &Path, max_zoom: u8) -> Result<ScanResult> {
     let reader = ElementReader::from_path(path)
         .with_context(|| format!("unable to open {}", path.display()))?;
 
-    let max_res_u8 = u8::from(max_resolution);
+    let max_zoom_usize = usize::from(max_zoom);
 
     // Use par_map_reduce for parallel processing of PBF blocks
     let (counts, node_total) = reader.par_map_reduce(
         // Map function: process each element and return local counts
         |element| {
-            let mut local_counts: Vec<HashMap<CellIndex, u64>> =
-                (0..=max_res_u8).map(|_| HashMap::new()).collect();
+            let mut local_counts: Vec<HashMap<(u32, u32), u64>> =
+                (0..=max_zoom).map(|_| HashMap::new()).collect();
             let mut local_total = 0u64;
 
-            if let Element::DenseNode(node) = element {
-                // Convert the node coordinates into an H3 cell at the requested resolution.
-                if let Ok(location) = LatLng::new(node.lat(), node.lon()) {
-                    let cell = location.to_cell(max_resolution);
-                    let max_index = usize::from(max_res_u8);
+            let (lat, lon) = match element {
+                Element::DenseNode(node) => (node.lat(), node.lon()),
+                Element::Node(node) => (node.lat(), node.lon()),
+                _ => return (local_counts, local_total),
+            };
 
-                    // Count the node for the max-resolution cell
-                    *local_counts[max_index].entry(cell).or_insert(0) += 1;
+            if !(lat.is_finite() && lon.is_finite()) {
+                return (local_counts, local_total);
+            }
 
-                    // Bubble the update up the tree to parent resolutions
-                    let mut current = cell;
-                    for parent_res in (0..max_res_u8).rev() {
-                        let resolution =
-                            Resolution::try_from(parent_res).expect("valid resolution");
-                        current = current
-                            .parent(resolution)
-                            .expect("H3 parent must exist at lower resolution");
-                        let idx = usize::from(parent_res);
-                        *local_counts[idx].entry(current).or_insert(0) += 1;
-                    }
+            if let Some((mut x, mut y)) = lon_lat_to_tile(lon, lat, max_zoom) {
+                *local_counts[max_zoom_usize].entry((x, y)).or_insert(0) += 1;
 
-                    local_total = 1;
+                // Bubble up to parent zoom levels by shifting.
+                for zoom in (0..max_zoom).rev() {
+                    x >>= 1;
+                    y >>= 1;
+                    *local_counts[usize::from(zoom)].entry((x, y)).or_insert(0) += 1;
                 }
+
+                local_total = 1;
             }
 
             (local_counts, local_total)
@@ -172,7 +170,7 @@ fn scan_osm(path: &Path, max_resolution: Resolution) -> Result<ScanResult> {
         // Identity function: create empty state
         || {
             (
-                (0..=max_res_u8).map(|_| HashMap::new()).collect::<Vec<_>>(),
+                (0..=max_zoom).map(|_| HashMap::new()).collect::<Vec<_>>(),
                 0u64,
             )
         },
@@ -194,8 +192,8 @@ fn scan_osm(path: &Path, max_resolution: Resolution) -> Result<ScanResult> {
 
 /// Translate the hierarchical counts into the final set of shards.
 fn build_shards(
-    counts: &[HashMap<CellIndex, u64>],
-    max_resolution: Resolution,
+    counts: &[HashMap<(u32, u32), u64>],
+    max_zoom: u8,
     max_nodes: u64,
 ) -> Vec<Shard> {
     let mut shards = Vec::new();
@@ -205,14 +203,15 @@ fn build_shards(
         return shards;
     }
 
-    // Start splitting from every populated resolution-0 cell.
+    // Start splitting from every populated zoom-0 tile.
     if let Some(root_counts) = counts.get(0) {
-        for (&cell, _) in root_counts.iter() {
+        for (&(x, y), _) in root_counts.iter() {
             subdivide(
-                cell,
-                Resolution::Zero,
+                0,
+                x,
+                y,
                 counts,
-                max_resolution,
+                max_zoom,
                 max_nodes,
                 &mut shards,
                 &mut oversized,
@@ -222,13 +221,13 @@ fn build_shards(
 
     if !oversized.is_empty() {
         eprintln!(
-            "Warning: {} cells at max resolution exceeded the node threshold (showing up to 5):",
+            "Warning: {} tiles at max zoom exceeded the node threshold (showing up to 5):",
             oversized.len()
         );
         for shard in oversized.iter().take(5) {
             eprintln!(
-                "  {} -> {} nodes (max {})",
-                shard.cell, shard.node_count, max_nodes
+                "  z/x/y {}/{}/{} -> {} nodes (max {})",
+                shard.zoom, shard.x, shard.y, shard.node_count, max_nodes
             );
         }
         if oversized.len() > 5 {
@@ -241,56 +240,66 @@ fn build_shards(
 
 /// Recursively split a cell until it satisfies the node constraint or we hit max resolution.
 fn subdivide(
-    cell: CellIndex,
-    resolution: Resolution,
-    counts: &[HashMap<CellIndex, u64>],
-    max_resolution: Resolution,
+    zoom: u8,
+    x: u32,
+    y: u32,
+    counts: &[HashMap<(u32, u32), u64>],
+    max_zoom: u8,
     max_nodes: u64,
     shards: &mut Vec<Shard>,
     oversized: &mut Vec<Shard>,
 ) {
-    let res_idx = resolution_index(resolution);
+    let res_idx = usize::from(zoom);
     let count = counts
         .get(res_idx)
-        .and_then(|map| map.get(&cell).copied())
+        .and_then(|map| map.get(&(x, y)).copied())
         .unwrap_or(0);
 
     if count == 0 {
         return;
     }
 
-    if count <= max_nodes || resolution == max_resolution {
+    if count <= max_nodes || zoom == max_zoom {
         let shard = Shard {
-            cell,
+            zoom,
+            x,
+            y,
             node_count: count,
         };
         shards.push(shard);
-        if count > max_nodes && resolution == max_resolution {
+        if count > max_nodes && zoom == max_zoom {
             oversized.push(shard);
         }
         return;
     }
 
-    let child_res_value = u8::from(resolution) + 1;
-    let child_resolution = Resolution::try_from(child_res_value).expect("resolution bounds");
+    let child_zoom = zoom + 1;
+    let child_idx = usize::from(child_zoom);
+    let candidates = [
+        (x * 2, y * 2),
+        (x * 2 + 1, y * 2),
+        (x * 2, y * 2 + 1),
+        (x * 2 + 1, y * 2 + 1),
+    ];
 
-    for child in cell.children(child_resolution) {
-        let child_idx = resolution_index(child_resolution);
+    for (cx, cy) in candidates {
         let child_count = counts
             .get(child_idx)
-            .and_then(|map| map.get(&child).copied())
+            .and_then(|map| map.get(&(cx, cy)).copied())
             .unwrap_or(0);
-        if child_count > 0 {
-            subdivide(
-                child,
-                child_resolution,
-                counts,
-                max_resolution,
-                max_nodes,
-                shards,
-                oversized,
-            );
+        if child_count == 0 {
+            continue;
         }
+        subdivide(
+            child_zoom,
+            cx,
+            cy,
+            counts,
+            max_zoom,
+            max_nodes,
+            shards,
+            oversized,
+        );
     }
 }
 
@@ -299,12 +308,15 @@ fn generate_geojson(shards: &[Shard]) -> Result<String> {
     let mut features = Vec::with_capacity(shards.len());
 
     for shard in shards {
-        let ring = polygon_ring(shard.cell);
+        let ring = tile_ring(shard.zoom, shard.x, shard.y);
+        let shard_id = format!("{}-{}-{}", shard.zoom, shard.x, shard.y);
         features.push(Feature {
             feature_type: "Feature",
             properties: Properties {
-                h3_index: shard.cell.to_string(),
-                resolution: u8::from(shard.cell.resolution()),
+                shard_id,
+                z: shard.zoom,
+                x: shard.x,
+                y: shard.y,
                 node_count: shard.node_count,
             },
             geometry: Geometry {
@@ -342,22 +354,44 @@ async fn upload_to_s3(content: &str, bucket: &str, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build a single closed polygon ring for the provided cell.
-fn polygon_ring(cell: CellIndex) -> Vec<[f64; 2]> {
-    let mut ring: Vec<[f64; 2]> = cell
-        .boundary()
-        .iter()
-        .map(|vertex| [vertex.lng(), vertex.lat()])
-        .collect();
-
-    if let Some(first) = ring.first().copied() {
-        ring.push(first);
+fn lon_lat_to_tile(lon: f64, lat: f64, zoom: u8) -> Option<(u32, u32)> {
+    if !(lon.is_finite() && lat.is_finite()) {
+        return None;
     }
 
-    ring
+    // Clamp latitude to the Web Mercator limit.
+    let lat = lat.clamp(-85.05112878, 85.05112878);
+    let n = 2u32.checked_pow(u32::from(zoom))?;
+
+    let x = ((lon + 180.0) / 360.0 * f64::from(n)).floor();
+    let lat_rad = lat.to_radians();
+    let y = ((1.0 - (lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / PI) / 2.0 * f64::from(n))
+        .floor();
+
+    let x = x.clamp(0.0, f64::from(n - 1)) as u32;
+    let y = y.clamp(0.0, f64::from(n - 1)) as u32;
+    Some((x, y))
 }
 
-/// Helper to turn a resolution into a vector index.
-fn resolution_index(resolution: Resolution) -> usize {
-    usize::from(u8::from(resolution))
+fn tile_bbox(zoom: u8, x: u32, y: u32) -> (f64, f64, f64, f64) {
+    let n = 2u32.pow(u32::from(zoom)) as f64;
+    let west = (f64::from(x) / n) * 360.0 - 180.0;
+    let east = (f64::from(x + 1) / n) * 360.0 - 180.0;
+
+    let north_rad = (PI * (1.0 - 2.0 * (f64::from(y) / n))).sinh().atan();
+    let south_rad = (PI * (1.0 - 2.0 * (f64::from(y + 1) / n))).sinh().atan();
+    let north = north_rad.to_degrees();
+    let south = south_rad.to_degrees();
+    (west, south, east, north)
+}
+
+fn tile_ring(zoom: u8, x: u32, y: u32) -> Vec<[f64; 2]> {
+    let (west, south, east, north) = tile_bbox(zoom, x, y);
+    vec![
+        [west, south],
+        [east, south],
+        [east, north],
+        [west, north],
+        [west, south],
+    ]
 }

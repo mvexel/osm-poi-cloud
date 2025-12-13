@@ -23,11 +23,15 @@ def handler(event, context):
         shards = []
         for feature in manifest_content.get("features", []):
             props = feature.get("properties", {})
-            if "h3_index" in props and "resolution" in props:
-                shards.append({
-                    "h3_index": str(props["h3_index"]),
-                    "resolution": int(props["resolution"]),
-                })
+            if "shard_id" in props and "z" in props and "x" in props and "y" in props:
+                shards.append(
+                    {
+                        "shard_id": str(props["shard_id"]),
+                        "z": int(props["z"]),
+                        "x": int(props["x"]),
+                        "y": int(props["y"]),
+                    }
+                )
 
         return {"status": "SUCCESS", "shards": shards}
     except Exception as e:
