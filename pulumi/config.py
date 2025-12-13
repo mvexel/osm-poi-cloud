@@ -27,10 +27,10 @@ max_vcpus = config.get_int("max_vcpus") or 256
 spot_bid_percentage = config.get_int("spot_bid_percentage") or 100
 
 # Data source configuration
-# Default to Utah for testing, use planet URL for production
+# Default to California for testing, use planet URL for production
 planet_url = (
     config.get("planet_url")
-    or "https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf"
+    or "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf"
 )
 
 # Sharding configuration (optional; defaults are in the sharder binary)
