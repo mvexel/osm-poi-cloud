@@ -375,6 +375,24 @@ def process_to_parquet(
     load_duckdb_extension(conn, "spatial", "INSTALL spatial")
     load_duckdb_extension(conn, "h3", "INSTALL h3 FROM community")
 
+    # DuckDB H3 extension has had naming differences across versions.
+    # Resolve the function name dynamically to keep the pipeline portable.
+    h3_cell_to_string_fn = None
+    for candidate in ("h3_cell_to_cell_string", "h3_cell_to_string"):
+        exists = conn.execute(
+            "SELECT 1 FROM duckdb_functions() WHERE function_name = ? LIMIT 1",
+            [candidate],
+        ).fetchone()
+        if exists:
+            h3_cell_to_string_fn = candidate
+            break
+    if h3_cell_to_string_fn is None:
+        raise RuntimeError(
+            "DuckDB H3 extension is missing a cell-to-string function; expected one of "
+            "'h3_cell_to_cell_string' or 'h3_cell_to_string'."
+        )
+    print(f"DuckDB H3: using {h3_cell_to_string_fn}()")
+
     try:
         h3_min = int(H3_MIN_RESOLUTION) if H3_MIN_RESOLUTION is not None else 3
         h3_max = int(H3_MAX_RESOLUTION) if H3_MAX_RESOLUTION is not None else 9
@@ -389,7 +407,7 @@ def process_to_parquet(
     h3_columns = []
     for res in range(h3_min, h3_max + 1):
         h3_columns.append(
-            "h3_cell_to_cell_string(h3_latlng_to_cell(ST_Y(centroid)::DOUBLE, ST_X(centroid)::DOUBLE, "
+            f"{h3_cell_to_string_fn}(h3_latlng_to_cell(ST_Y(centroid)::DOUBLE, ST_X(centroid)::DOUBLE, "
             f"{res})) as h3_r{res}"
         )
     h3_columns_sql = ",\n            ".join(h3_columns)
