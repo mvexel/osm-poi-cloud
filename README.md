@@ -188,8 +188,17 @@ aws stepfunctions start-execution \
 
 **Optional Environment Variables (set in Pulumi config):**
 - `PLANET_URL`: OSM data source (default: configured in `pulumi/config.py`)
-- `MAX_RESOLUTION`: H3 resolution for sharding (default: 7)
-- `MAX_NODES_PER_SHARD`: Max nodes per shard (default: 1000000)
+- `MAX_ZOOM`: Max Web Mercator zoom for sharding (optional; defaults are in `stack/sharding/src/main.rs`)
+- `MAX_NODES_PER_SHARD`: Max nodes per shard (optional; defaults are in `stack/sharding/src/main.rs`)
+
+Override sharder settings via Pulumi config:
+
+```bash
+cd pulumi
+pulumi config set max_zoom 11
+pulumi config set max_nodes_per_shard 1000000
+pulumi up
+```
 
 #### Monitor Execution
 
@@ -221,6 +230,50 @@ The pipeline executes these stages sequentially:
 6. **Tiles Job**: Generate PMTiles for visualization
 
 Each Batch job waits for the previous stage to complete before starting.
+
+#### Restart From Processor Stage
+
+If `runs/<RUN_ID>/planet.osm.pbf` and `runs/<RUN_ID>/shards/manifest.json` already exist in S3, you can rerun only the **processor** jobs (and then **merge**/**tiles**) without rerunning download/sharding.
+
+```bash
+cd pulumi
+
+RUN_ID="run-20251212-123456"  # reuse the existing run ID
+BUCKET="$(pulumi stack output data_bucket_name)"
+QUEUE="$(pulumi stack output job_queue_name)"
+JOB_DEFS_JSON="$(pulumi stack output --json job_definition_arns)"
+PROCESSOR_JOB_DEF_ARN="$(echo "$JOB_DEFS_JSON" | jq -r .processor)"
+MERGER_JOB_DEF_ARN="$(echo "$JOB_DEFS_JSON" | jq -r .merger)"
+TILES_JOB_DEF_ARN="$(echo "$JOB_DEFS_JSON" | jq -r .tiles)"
+
+# Rerun processor for shards that don't have output yet
+aws s3 cp "s3://$BUCKET/runs/$RUN_ID/shards/manifest.json" - | \
+  jq -r '.features[].properties | "\(.shard_id) \(.z) \(.x) \(.y)"' | \
+  while read -r SHARD_ID Z X Y; do
+    aws s3 ls "s3://$BUCKET/runs/$RUN_ID/shards/$SHARD_ID/data.parquet" >/dev/null 2>&1 && continue
+    aws s3 ls "s3://$BUCKET/runs/$RUN_ID/shards/$SHARD_ID/_EMPTY" >/dev/null 2>&1 && continue
+    aws batch submit-job \
+      --job-name "osm-h3-process-$RUN_ID-$SHARD_ID" \
+      --job-queue "$QUEUE" \
+      --job-definition "$PROCESSOR_JOB_DEF_ARN" \
+      --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"},{\"name\":\"SHARD_ID\",\"value\":\"$SHARD_ID\"},{\"name\":\"SHARD_Z\",\"value\":\"$Z\"},{\"name\":\"SHARD_X\",\"value\":\"$X\"},{\"name\":\"SHARD_Y\",\"value\":\"$Y\"}]}"
+  done
+
+# After processor jobs complete, rerun merge + tiles
+aws batch submit-job \
+  --job-name "osm-h3-merge-$RUN_ID" \
+  --job-queue "$QUEUE" \
+  --job-definition "$MERGER_JOB_DEF_ARN" \
+  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"}]}"
+
+aws batch submit-job \
+  --job-name "osm-h3-tiles-$RUN_ID" \
+  --job-queue "$QUEUE" \
+  --job-definition "$TILES_JOB_DEF_ARN" \
+  --container-overrides "{\"environment\":[{\"name\":\"RUN_ID\",\"value\":\"$RUN_ID\"}]}"
+```
+
+To force reprocessing of a shard, delete its existing output (`runs/<RUN_ID>/shards/<SHARD_ID>/data.parquet` or `runs/<RUN_ID>/shards/<SHARD_ID>/_EMPTY`) and resubmit that shard.
 
 #### Check Job Logs
 
