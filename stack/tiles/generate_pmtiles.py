@@ -66,12 +66,21 @@ def parquet_to_geojson(parquet_files: list[Path], output_path: Path) -> int:
     print("Converting Parquet to GeoJSON...")
     total_features = 0
 
+    def _require_columns(df: dict, cols: list[str], pq_file: Path) -> None:
+        missing = [c for c in cols if c not in df]
+        if missing:
+            raise KeyError(
+                f"Missing required Parquet columns {missing} in {pq_file.name}. "
+                f"Available: {sorted(df.keys())}"
+            )
+
     with open(output_path, "w") as f:
         for pq_file in parquet_files:
             print(f"  Processing {pq_file.name}...")
             table = pq.read_table(pq_file)
             df = table.to_pydict()
 
+            _require_columns(df, ["lon", "lat", "name", "class"], pq_file)
             num_rows = len(df["name"])
             for i in range(num_rows):
                 feature = {
@@ -83,13 +92,30 @@ def parquet_to_geojson(parquet_files: list[Path], output_path: Path) -> int:
                     "properties": {
                         "name": df["name"][i],
                         "class": df["class"][i],
-                        "state": df["state"][i],
                     },
                 }
 
                 # Add optional properties if present
-                for key in ["amenity", "shop", "cuisine", "brand", "opening_hours"]:
-                    if key in df and df[key][i]:
+                for key in [
+                    "state",
+                    "shard_id",
+                    "osm_id",
+                    "osm_type",
+                    "amenity",
+                    "shop",
+                    "cuisine",
+                    "brand",
+                    "opening_hours",
+                    "website",
+                    "phone",
+                    "operator",
+                ]:
+                    if key in df and df[key][i] not in (None, ""):
+                        feature["properties"][key] = df[key][i]
+
+                # Include any H3 columns if present (e.g. h3_r3..h3_r9)
+                for key in df.keys():
+                    if key.startswith("h3_r") and df[key][i] not in (None, ""):
                         feature["properties"][key] = df[key][i]
 
                 f.write(json.dumps(feature) + "\n")
