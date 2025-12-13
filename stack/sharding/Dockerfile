@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     aria2 \
+    awscli \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/osm-planet-sharding /usr/local/bin/
